@@ -19,8 +19,14 @@ class Settings(BaseSettings):
     )
     
     # ===== API Keys =====
-    anthropic_api_key: str = Field(..., description="Anthropic API key for Claude", min_length=10)
-    voyage_api_key: str = Field(..., description="Voyage AI API key for embeddings", min_length=10)
+    dashscope_api_key: Optional[str] = Field(
+        default=None,
+        description="DashScope API key for Qwen (required for real LLM calls)",
+    )
+    voyage_api_key: Optional[str] = Field(
+        default=None,
+        description="Voyage AI API key for embeddings (required for real embeddings)",
+    )
     cohere_api_key: Optional[str] = Field(None, description="Cohere API key for reranking (optional)")
     
     # ===== Database Configuration =====
@@ -31,11 +37,16 @@ class Settings(BaseSettings):
     vector_search_top_k: int = Field(default=10, description="Number of chunks for vector search", gt=0)
     
     # ===== Model Configuration =====
-    llm_model: str = Field(default="claude-3-haiku-20240307", description="Claude model to use")
+    llm_model: str = Field(default="qwen-plus", description="Qwen model to use")
     llm_temperature: float = Field(default=0.0, description="LLM temperature (0.0-1.0)", ge=0.0, le=1.0)
     llm_max_tokens: int = Field(default=4096, description="Maximum tokens for LLM response", gt=0)
-    embedding_model: str = Field(default="voyage-large-2", description="Voyage AI embedding model")
-    embedding_dimension: int = Field(default=1536, description="Embedding vector dimension", gt=0)
+    qwen_base_url: str = Field(
+        default="https://dashscope.aliyuncs.com/compatible-mode/v1",
+        description="DashScope OpenAI-compatible base URL",
+        min_length=10,
+    )
+    embedding_model: str = Field(default="BAAI/bge-large-en-v1.5", description="Embedding model to use")
+    embedding_dimension: int = Field(default=1024, description="Embedding vector dimension", gt=0)
     
     # ===== Chunking Configuration =====
     chunk_size: int = Field(default=500, description="Document chunk size in tokens", gt=0)
@@ -138,7 +149,8 @@ class Settings(BaseSettings):
             "model": self.llm_model,
             "temperature": self.llm_temperature,
             "max_tokens": self.llm_max_tokens,
-            "api_key": self.anthropic_api_key
+            "api_key": self.dashscope_api_key,
+            "base_url": self.qwen_base_url,
         }
     
     def is_production(self) -> bool:

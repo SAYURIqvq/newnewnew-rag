@@ -4,17 +4,18 @@ Integration tests for Planner Agent with full system.
 Tests Planner Agent integration with:
 - AgentState
 - Config
-- LLM (Claude API)
+- LLM (Qwen via DashScope)
 - Multi-agent workflows
 """
 
 import pytest
 from unittest.mock import Mock
-from langchain_anthropic import ChatAnthropic
+from langchain_core.language_models.chat_models import BaseChatModel
 
 from src.agents.planner import PlannerAgent
 from src.models.agent_state import AgentState, Strategy
 from src.config import get_settings
+from src.llm.qwen import create_qwen_chat_model
 
 
 @pytest.fixture
@@ -26,14 +27,10 @@ def real_llm():
     """
     try:
         settings = get_settings()
-        llm = ChatAnthropic(
-            model=settings.llm_model,
-            temperature=0.0,
-            api_key=settings.anthropic_api_key
-        )
+        llm = create_qwen_chat_model(settings, temperature=0.0)
         return llm
     except Exception:
-        pytest.skip("Anthropic API key not configured")
+        pytest.skip("DashScope API key not configured")
 
 
 @pytest.fixture
@@ -49,7 +46,7 @@ class TestPlannerWithConfig:
         """Test planner loads thresholds from config"""
         try:
             settings = get_settings()
-            mock_llm = Mock(spec=ChatAnthropic)
+            mock_llm = Mock(spec=BaseChatModel)
             
             planner = PlannerAgent(llm=mock_llm)
             
@@ -61,7 +58,7 @@ class TestPlannerWithConfig:
     
     def test_planner_respects_custom_thresholds_over_config(self):
         """Test custom thresholds override config"""
-        mock_llm = Mock(spec=ChatAnthropic)
+        mock_llm = Mock(spec=BaseChatModel)
         
         planner = PlannerAgent(
             llm=mock_llm,
@@ -118,7 +115,7 @@ class TestPlannerStateIntegration:
     
     def test_planner_updates_all_state_fields(self):
         """Test planner updates all required state fields"""
-        mock_llm = Mock(spec=ChatAnthropic)
+        mock_llm = Mock(spec=BaseChatModel)
         mock_llm.invoke.return_value.content = "0.5"
         
         planner = PlannerAgent(llm=mock_llm)
@@ -134,7 +131,7 @@ class TestPlannerStateIntegration:
     
     def test_planner_preserves_existing_state(self):
         """Test planner doesn't overwrite unrelated state"""
-        mock_llm = Mock(spec=ChatAnthropic)
+        mock_llm = Mock(spec=BaseChatModel)
         mock_llm.invoke.return_value.content = "0.5"
         
         planner = PlannerAgent(llm=mock_llm)
@@ -157,7 +154,7 @@ class TestPlannerStateIntegration:
     
     def test_planner_metadata_structure(self):
         """Test planner metadata has correct structure"""
-        mock_llm = Mock(spec=ChatAnthropic)
+        mock_llm = Mock(spec=BaseChatModel)
         mock_llm.invoke.return_value.content = "0.5"
         
         planner = PlannerAgent(llm=mock_llm)
@@ -181,7 +178,7 @@ class TestPlannerWorkflow:
     
     def test_planner_as_first_agent(self):
         """Test planner works as first agent in pipeline"""
-        mock_llm = Mock(spec=ChatAnthropic)
+        mock_llm = Mock(spec=BaseChatModel)
         mock_llm.invoke.return_value.content = "0.5"
         
         planner = PlannerAgent(llm=mock_llm)
@@ -199,7 +196,7 @@ class TestPlannerWorkflow:
     
     def test_planner_output_usable_by_downstream_agents(self):
         """Test planner output format is usable by other agents"""
-        mock_llm = Mock(spec=ChatAnthropic)
+        mock_llm = Mock(spec=BaseChatModel)
         mock_llm.invoke.return_value.content = "0.5"
         
         planner = PlannerAgent(llm=mock_llm)
@@ -224,7 +221,7 @@ class TestPlannerPerformance:
     
     def test_planner_execution_time_reasonable(self):
         """Test planner executes in reasonable time"""
-        mock_llm = Mock(spec=ChatAnthropic)
+        mock_llm = Mock(spec=BaseChatModel)
         mock_llm.invoke.return_value.content = "0.5"
         
         planner = PlannerAgent(llm=mock_llm)
@@ -238,7 +235,7 @@ class TestPlannerPerformance:
     
     def test_planner_handles_multiple_queries_efficiently(self):
         """Test planner can handle multiple queries"""
-        mock_llm = Mock(spec=ChatAnthropic)
+        mock_llm = Mock(spec=BaseChatModel)
         mock_llm.invoke.return_value.content = "0.5"
         
         planner = PlannerAgent(llm=mock_llm)
@@ -266,7 +263,7 @@ class TestPlannerEdgeCases:
     
     def test_planner_handles_empty_query(self):
         """Test planner with empty query"""
-        mock_llm = Mock(spec=ChatAnthropic)
+        mock_llm = Mock(spec=BaseChatModel)
         mock_llm.invoke.return_value.content = "0.1"
         
         planner = PlannerAgent(llm=mock_llm)
@@ -278,7 +275,7 @@ class TestPlannerEdgeCases:
     
     def test_planner_handles_very_long_query(self):
         """Test planner with very long query"""
-        mock_llm = Mock(spec=ChatAnthropic)
+        mock_llm = Mock(spec=BaseChatModel)
         mock_llm.invoke.return_value.content = "0.9"
         
         planner = PlannerAgent(llm=mock_llm)
@@ -294,7 +291,7 @@ class TestPlannerEdgeCases:
     
     def test_planner_handles_special_characters(self):
         """Test planner with special characters in query"""
-        mock_llm = Mock(spec=ChatAnthropic)
+        mock_llm = Mock(spec=BaseChatModel)
         mock_llm.invoke.return_value.content = "0.5"
         
         planner = PlannerAgent(llm=mock_llm)
@@ -312,7 +309,7 @@ class TestPlannerConsistency:
     
     def test_same_query_similar_complexity(self):
         """Test same query produces similar complexity"""
-        mock_llm = Mock(spec=ChatAnthropic)
+        mock_llm = Mock(spec=BaseChatModel)
         mock_llm.invoke.return_value.content = "0.5"
         
         planner = PlannerAgent(llm=mock_llm)
@@ -332,7 +329,7 @@ class TestPlannerConsistency:
     
     def test_complexity_increases_with_query_length(self):
         """Test complexity generally increases with query length"""
-        mock_llm = Mock(spec=ChatAnthropic)
+        mock_llm = Mock(spec=BaseChatModel)
         
         planner = PlannerAgent(llm=mock_llm)
         
@@ -360,7 +357,7 @@ class TestPlannerDocumentation:
     
     def test_threshold_boundaries_documented_correctly(self):
         """Test that threshold boundaries work as documented"""
-        mock_llm = Mock(spec=ChatAnthropic)
+        mock_llm = Mock(spec=BaseChatModel)
         mock_llm.invoke.return_value.content = "0.0"
         
         planner = PlannerAgent(
@@ -377,7 +374,7 @@ class TestPlannerDocumentation:
     
     def test_feature_weights_documented_correctly(self):
         """Test that feature weights match documentation"""
-        mock_llm = Mock(spec=ChatAnthropic)
+        mock_llm = Mock(spec=BaseChatModel)
         planner = PlannerAgent(llm=mock_llm)
         
         # Extract features

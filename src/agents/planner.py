@@ -19,7 +19,7 @@ Strategies:
 
 import re
 from typing import Dict, Tuple
-from langchain_anthropic import ChatAnthropic
+from langchain_core.language_models.chat_models import BaseChatModel
 
 from src.agents.base_agent import BaseAgent
 from src.models.agent_state import AgentState, Strategy
@@ -41,8 +41,9 @@ class PlannerAgent(BaseAgent):
         multihop_threshold: Complexity threshold for multihop strategy
         
     Example:
-        >>> from langchain_anthropic import ChatAnthropic
-        >>> llm = ChatAnthropic(model="claude-3-5-sonnet-20241022")
+        >>> from src.config import get_settings
+        >>> from src.llm.qwen import create_qwen_chat_model
+        >>> llm = create_qwen_chat_model(get_settings())
         >>> planner = PlannerAgent(llm=llm)
         >>> 
         >>> state = AgentState(query="What is Python?")
@@ -54,7 +55,7 @@ class PlannerAgent(BaseAgent):
     
     def __init__(
         self,
-        llm: ChatAnthropic,
+        llm: BaseChatModel,
         simple_threshold: float = None,
         multihop_threshold: float = None
     ):

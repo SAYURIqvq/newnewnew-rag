@@ -19,8 +19,8 @@ from src.agents.retrieval.vector_agent import VectorSearchAgent
 from src.agents.synthesis import SynthesisAgent
 from src.models.agent_state import AgentState
 
-from langchain_anthropic import ChatAnthropic
 from src.config import get_settings
+from src.llm.qwen import create_qwen_chat_model
 
 
 def test_critic_agent():
@@ -31,11 +31,7 @@ def test_critic_agent():
     print("=" * 60)
     
     settings = get_settings()
-    llm = ChatAnthropic(
-        model=settings.llm_model,
-        temperature=0.0,
-        api_key=settings.anthropic_api_key
-    )
+    llm = create_qwen_chat_model(settings, temperature=0.0)
     
     # Test with good answer
     print("\n📝 Test Case 1: Good Answer")
@@ -93,11 +89,7 @@ def test_self_reflection():
     print("=" * 60)
     
     settings = get_settings()
-    llm = ChatAnthropic(
-        model=settings.llm_model,
-        temperature=0.3,
-        api_key=settings.anthropic_api_key
-    )
+    llm = create_qwen_chat_model(settings, temperature=0.3)
     
     # Test query
     query = "What is Python used for?"
@@ -164,11 +156,7 @@ def test_full_pipeline():
     print("=" * 60)
     
     settings = get_settings()
-    llm = ChatAnthropic(
-        model=settings.llm_model,
-        temperature=0.3,
-        api_key=settings.anthropic_api_key
-    )
+    llm = create_qwen_chat_model(settings, temperature=0.3)
     
     query = "Explain machine learning and its main types"
     

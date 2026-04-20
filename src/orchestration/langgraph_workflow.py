@@ -36,9 +36,10 @@ class AgenticRAGWorkflow:
         logger: Logger instance
         
     Example:
-        >>> from langchain_anthropic import ChatAnthropic
+        >>> from src.config import get_settings
+        >>> from src.llm.qwen import create_qwen_chat_model
         >>> 
-        >>> llm = ChatAnthropic(model="claude-3-5-sonnet-20241022")
+        >>> llm = create_qwen_chat_model(get_settings())
         >>> planner = PlannerAgent(llm=llm)
         >>> coordinator = RetrievalCoordinator(...)
         >>> validator = ValidatorAgent(llm=llm)

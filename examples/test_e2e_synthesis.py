@@ -21,8 +21,8 @@ from src.agents.retrieval.keyword_agent import KeywordSearchAgent
 from src.agents.retrieval.graph_agent import GraphSearchAgent
 from src.models.agent_state import AgentState
 
-from langchain_anthropic import ChatAnthropic
 from src.config import get_settings
+from src.llm.qwen import create_qwen_chat_model
 
 
 def test_e2e_with_synthesis():
@@ -34,11 +34,7 @@ def test_e2e_with_synthesis():
     
     # Initialize LLM
     settings = get_settings()
-    llm = ChatAnthropic(
-        model=settings.llm_model,
-        temperature=settings.llm_temperature,
-        api_key=settings.anthropic_api_key
-    )
+    llm = create_qwen_chat_model(settings)
     
     # Test query
     query = "What is Python used for in machine learning?"

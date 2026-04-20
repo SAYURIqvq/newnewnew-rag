@@ -5,10 +5,10 @@ Demonstrates how to use the Planner Agent to analyze queries
 and select execution strategies.
 """
 
-from langchain_anthropic import ChatAnthropic
 from src.agents.planner import PlannerAgent
 from src.models.agent_state import AgentState
 from src.config import get_settings
+from src.llm.qwen import create_qwen_chat_model
 
 
 def main():
@@ -23,12 +23,8 @@ def main():
     settings = get_settings()
     
     # Initialize LLM
-    print("Initializing Claude...")
-    llm = ChatAnthropic(
-        model=settings.llm_model,
-        temperature=settings.llm_temperature,
-        api_key=settings.anthropic_api_key
-    )
+    print("Initializing Qwen...")
+    llm = create_qwen_chat_model(settings)
     
     # Create Planner Agent
     planner = PlannerAgent(llm=llm)
@@ -98,11 +94,7 @@ def demo_custom_thresholds():
     print()
     
     settings = get_settings()
-    llm = ChatAnthropic(
-        model=settings.llm_model,
-        temperature=settings.llm_temperature,
-        api_key=settings.anthropic_api_key
-    )
+    llm = create_qwen_chat_model(settings)
     
     # Create planner with stricter thresholds
     planner = PlannerAgent(
@@ -136,11 +128,7 @@ def demo_query_comparison():
     print()
     
     settings = get_settings()
-    llm = ChatAnthropic(
-        model=settings.llm_model,
-        temperature=settings.llm_temperature,
-        api_key=settings.anthropic_api_key
-    )
+    llm = create_qwen_chat_model(settings)
     
     planner = PlannerAgent(llm=llm)
     

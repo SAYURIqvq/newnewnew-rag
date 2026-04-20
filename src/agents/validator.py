@@ -16,7 +16,7 @@ Decision Logic:
 """
 
 from typing import List, Tuple
-from langchain_anthropic import ChatAnthropic
+from langchain_core.language_models.chat_models import BaseChatModel
 
 from src.agents.base_agent import BaseAgent
 from src.models.agent_state import AgentState, Chunk
@@ -37,8 +37,9 @@ class ValidatorAgent(BaseAgent):
         max_retries: Maximum retrieval retry attempts
         
     Example:
-        >>> from langchain_anthropic import ChatAnthropic
-        >>> llm = ChatAnthropic(model="claude-3-5-sonnet-20241022")
+        >>> from src.config import get_settings
+        >>> from src.llm.qwen import create_qwen_chat_model
+        >>> llm = create_qwen_chat_model(get_settings())
         >>> validator = ValidatorAgent(llm=llm)
         >>> 
         >>> state = AgentState(query="What is Python?", chunks=[...])
@@ -50,7 +51,7 @@ class ValidatorAgent(BaseAgent):
     
     def __init__(
         self,
-        llm: ChatAnthropic,
+        llm: BaseChatModel,
         threshold: float = None,
         max_retries: int = None
     ):

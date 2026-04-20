@@ -21,42 +21,36 @@ from ragas.metrics import (
 )
 from ragas.llms import LangchainLLMWrapper
 from ragas.embeddings import LangchainEmbeddingsWrapper
-from langchain_anthropic import ChatAnthropic
 from langchain_core.embeddings import Embeddings
+from src.config import get_settings
+from src.llm.qwen import create_qwen_chat_model
 
-class VoyageEmbeddings(Embeddings):
+class BGELargeEmbeddings(Embeddings):
     """
     Custom Embeddings class untuk RAGAS.
-    Pakai Voyage AI (sama seperti retrieval kita).
+    Pakai Sentence-Transformers (BGE-large) sama seperti retrieval kita.
     """
 
     def __init__(self):
-        import voyageai
-        api_key = os.environ.get("VOYAGE_API_KEY")
-        if not api_key:
-            raise ValueError("VOYAGE_API_KEY not found in .env")
-        self.client = voyageai.Client(api_key=api_key)
-        self.model = "voyage-large-2-instruct"
+        import os as _os
+        _os.environ.setdefault("TRANSFORMERS_NO_TF", "1")
+        _os.environ.setdefault("USE_TF", "0")
+        from sentence_transformers import SentenceTransformer
+        settings = get_settings()
+        self.model = settings.embedding_model
+        self.client = SentenceTransformer(self.model)
 
     def embed_documents(self, texts: list[str]) -> list[list[float]]:
         """Embed list of documents."""
         if not texts:
             return []
-        response = self.client.embed(
-            texts,
-            model=self.model,
-            input_type="document"
-        )
-        return response.embeddings
+        embs = self.client.encode(texts, normalize_embeddings=True, show_progress_bar=False)
+        return embs.tolist()
 
     def embed_query(self, text: str) -> list[float]:
         """Embed single query."""
-        response = self.client.embed(
-            [text],
-            model=self.model,
-            input_type="query"
-        )
-        return response.embeddings[0]
+        emb = self.client.encode([text], normalize_embeddings=True, show_progress_bar=False)[0]
+        return emb.tolist()
 
 # ========== RAGAS EVALUATOR ==========
 
@@ -66,26 +60,17 @@ class RAGASEvaluator:
     Uses Claude (LLM) + Voyage AI (Embeddings).
     """
 
-    def __init__(self, model: str = "claude-sonnet-4-20250514"):
-        # Validate API keys
-        anthropic_key = os.environ.get("ANTHROPIC_API_KEY")
-        if not anthropic_key:
-            raise ValueError("ANTHROPIC_API_KEY not found in .env")
+    def __init__(self, model: str = "qwen-plus"):
+        settings = get_settings()
+        if not settings.dashscope_api_key:
+            raise ValueError("DASHSCOPE_API_KEY not found in .env")
 
-        voyage_key = os.environ.get("VOYAGE_API_KEY")
-        if not voyage_key:
-            raise ValueError("VOYAGE_API_KEY not found in .env")
-
-        # Override LLM → Claude
-        llm = ChatAnthropic(
-            model=model,
-            api_key=anthropic_key,
-            temperature=0.0
-        )
+        # Override LLM → Qwen (DashScope compatible-mode)
+        llm = create_qwen_chat_model(settings, model=model, temperature=0.0)
         self.llm = LangchainLLMWrapper(llm)
 
-        # Override Embeddings → Voyage AI
-        self.embeddings = LangchainEmbeddingsWrapper(VoyageEmbeddings())
+        # Override Embeddings → BGE-large (Sentence-Transformers)
+        self.embeddings = LangchainEmbeddingsWrapper(BGELargeEmbeddings())
 
         self.metrics = [
             answer_relevancy,
@@ -95,8 +80,8 @@ class RAGASEvaluator:
         ]
 
         print("📊 RAGAS Evaluator initialized")
-        print(f"   LLM: Claude ({model})")
-        print(f"   Embeddings: Voyage AI ({self.embeddings})")
+        print(f"   LLM: Qwen ({model})")
+        print(f"   Embeddings: BGE-large ({self.embeddings})")
         print(f"   Metrics: {len(self.metrics)}")
 
     def evaluate_rag_system(
@@ -118,7 +103,7 @@ class RAGASEvaluator:
 
         dataset = Dataset.from_dict(data)
 
-        print("   Running RAGAS evaluation with Claude + Voyage...")
+        print("   Running RAGAS evaluation with Qwen + BGE-large...")
 
         # ← Pass BOTH llm and embeddings
         results = evaluate(

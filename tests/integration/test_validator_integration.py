@@ -6,12 +6,12 @@ Tests Validator Agent integration with:
 - Config
 - Planner Agent (pipeline)
 - Retry loops
-- LLM (Claude API)
+- LLM (Qwen via DashScope)
 """
 
 import pytest
 from unittest.mock import Mock
-from langchain_anthropic import ChatAnthropic
+from langchain_core.language_models.chat_models import BaseChatModel
 
 from src.agents.validator import ValidatorAgent
 from src.agents.planner import PlannerAgent
@@ -22,7 +22,7 @@ from src.config import get_settings
 @pytest.fixture
 def mock_llm():
     """Create mock LLM for testing."""
-    llm = Mock(spec=ChatAnthropic)
+    llm = Mock(spec=BaseChatModel)
     response = Mock()
     response.content = "0.8"
     llm.invoke.return_value = response
@@ -67,7 +67,7 @@ class TestValidatorWithConfig:
         """Test validator loads threshold from config"""
         try:
             settings = get_settings()
-            mock_llm = Mock(spec=ChatAnthropic)
+            mock_llm = Mock(spec=BaseChatModel)
             
             validator = ValidatorAgent(llm=mock_llm)
             
@@ -79,7 +79,7 @@ class TestValidatorWithConfig:
     
     def test_validator_custom_threshold_overrides_config(self):
         """Test custom threshold overrides config"""
-        mock_llm = Mock(spec=ChatAnthropic)
+        mock_llm = Mock(spec=BaseChatModel)
         
         validator = ValidatorAgent(
             llm=mock_llm,

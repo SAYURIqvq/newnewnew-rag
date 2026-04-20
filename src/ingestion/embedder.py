@@ -1,14 +1,13 @@
 """
-Embedding Generator - Generate embeddings using Voyage AI.
+Embedding Generator - Generate embeddings.
 
-Uses Voyage AI API for high-quality semantic embeddings.
-Supports batch processing for efficiency.
+Default: local Sentence-Transformers model (BGE-large).
+Optionally supports Voyage AI when `EMBEDDING_MODEL` is a Voyage model name.
 """
 
+import os
 from typing import List, Dict, Any
 import time
-
-import voyageai
 
 from src.config import get_settings
 from src.utils.logger import setup_logger
@@ -22,7 +21,7 @@ class EmbeddingError(AgenticRAGException):
 
 class EmbeddingGenerator:
     """
-    Generate embeddings using Voyage AI.
+    Generate embeddings using local Sentence-Transformers (default) or Voyage AI (optional).
     
     Features:
     - Batch processing for efficiency
@@ -55,19 +54,43 @@ class EmbeddingGenerator:
         self.logger = setup_logger("embedder")
         settings = get_settings()
         
-        self.api_key = api_key or settings.voyage_api_key
         self.model = model or settings.embedding_model
         self.batch_size = batch_size or settings.batch_size
-        
-        # Initialize Voyage AI client
-        try:
-            self.client = voyageai.Client(api_key=self.api_key)
-            self.logger.info(f"Initialized Voyage AI client with model: {self.model}")
-        except Exception as e:
-            raise EmbeddingError(
-                message=f"Failed to initialize Voyage AI client: {str(e)}",
-                details={"error": str(e)}
-            )
+
+        self._provider = "sentence_transformers"
+        self.client = None
+
+        if self.model.lower().startswith("voyage"):
+            self._provider = "voyage"
+            self.api_key = api_key or settings.voyage_api_key
+            if not self.api_key:
+                raise EmbeddingError(
+                    message="VOYAGE_API_KEY is required when using Voyage embedding models",
+                    details={"embedding_model": self.model},
+                )
+            try:
+                import voyageai
+                self.client = voyageai.Client(api_key=self.api_key)
+                self.logger.info(f"Initialized Voyage AI client with model: {self.model}")
+            except Exception as e:
+                raise EmbeddingError(
+                    message=f"Failed to initialize Voyage AI client: {str(e)}",
+                    details={"error": str(e)},
+                ) from e
+        else:
+            # Local model via sentence-transformers
+            try:
+                # Avoid importing TensorFlow/Keras through transformers integrations
+                os.environ.setdefault("TRANSFORMERS_NO_TF", "1")
+                os.environ.setdefault("USE_TF", "0")
+                from sentence_transformers import SentenceTransformer
+                self.client = SentenceTransformer(self.model)
+                self.logger.info(f"Initialized SentenceTransformer model: {self.model}")
+            except Exception as e:
+                raise EmbeddingError(
+                    message=f"Failed to initialize SentenceTransformer model: {str(e)}",
+                    details={"embedding_model": self.model, "error": str(e)},
+                ) from e
         
         # Statistics
         self.total_embeddings = 0
@@ -145,39 +168,51 @@ class EmbeddingGenerator:
         Returns:
             List of embedding vectors
         """
-        max_retries = 3
-        retry_delay = 1  # seconds
-        
-        for attempt in range(max_retries):
-            try:
-                # Call Voyage AI API
-                result = self.client.embed(
-                    texts=texts,
-                    model=self.model,
-                    input_type="document"  # For indexing/retrieval
-                )
-                
-                # Extract embeddings from result
-                embeddings = result.embeddings
-                
-                # Validate embeddings
-                if len(embeddings) != len(texts):
-                    raise EmbeddingError(
-                        message=f"Expected {len(texts)} embeddings, got {len(embeddings)}",
-                        details={"expected": len(texts), "got": len(embeddings)}
+        if self._provider == "voyage":
+            max_retries = 3
+            retry_delay = 1  # seconds
+
+            for attempt in range(max_retries):
+                try:
+                    result = self.client.embed(
+                        texts=texts,
+                        model=self.model,
+                        input_type="document",
                     )
-                
-                return embeddings
-                
-            except Exception as e:
-                if attempt < max_retries - 1:
-                    self.logger.warning(
-                        f"Attempt {attempt + 1} failed, retrying in {retry_delay}s: {str(e)}"
-                    )
-                    time.sleep(retry_delay)
-                    retry_delay *= 2  # Exponential backoff
-                else:
-                    raise
+
+                    embeddings = result.embeddings
+                    if len(embeddings) != len(texts):
+                        raise EmbeddingError(
+                            message=f"Expected {len(texts)} embeddings, got {len(embeddings)}",
+                            details={"expected": len(texts), "got": len(embeddings)},
+                        )
+
+                    return embeddings
+
+                except Exception as e:
+                    if attempt < max_retries - 1:
+                        self.logger.warning(
+                            f"Attempt {attempt + 1} failed, retrying in {retry_delay}s: {str(e)}"
+                        )
+                        time.sleep(retry_delay)
+                        retry_delay *= 2
+                    else:
+                        raise
+
+        # sentence-transformers (local)
+        try:
+            embeddings = self.client.encode(
+                texts,
+                batch_size=min(self.batch_size, len(texts)),
+                normalize_embeddings=True,
+                show_progress_bar=False,
+            )
+            return embeddings.tolist()
+        except Exception as e:
+            raise EmbeddingError(
+                message=f"Failed to generate local embeddings: {str(e)}",
+                details={"embedding_model": self.model},
+            ) from e
     
     def generate_query_embedding(self, query: str) -> List[float]:
         """
@@ -197,18 +232,25 @@ class EmbeddingGenerator:
             >>> len(embedding)  # 1536
         """
         try:
-            result = self.client.embed(
-                texts=[query],
-                model=self.model,
-                input_type="query"  # For search queries
-            )
-            
-            return result.embeddings[0]
-            
+            if self._provider == "voyage":
+                result = self.client.embed(
+                    texts=[query],
+                    model=self.model,
+                    input_type="query",
+                )
+                return result.embeddings[0]
+
+            emb = self.client.encode(
+                [query],
+                normalize_embeddings=True,
+                show_progress_bar=False,
+            )[0]
+            return emb.tolist()
+
         except Exception as e:
             raise EmbeddingError(
                 message=f"Failed to generate query embedding: {str(e)}",
-                details={"query": query[:100], "error": str(e)}
+                details={"query": query[:100], "error": str(e)},
             ) from e
     
     def get_embedding_dimension(self) -> int:
@@ -222,15 +264,22 @@ class EmbeddingGenerator:
             >>> dim = generator.get_embedding_dimension()
             >>> print(dim)  # 1536
         """
-        # Model dimension mapping
-        model_dimensions = {
-            "voyage-large-2": 1536,
-            "voyage-2": 1024,
-            "voyage-code-2": 1536,
-            "voyage-lite-02-instruct": 1024
-        }
-        
-        return model_dimensions.get(self.model, 1536)  # Default 1536
+        if self._provider == "voyage":
+            model_dimensions = {
+                "voyage-large-2": 1536,
+                "voyage-2": 1024,
+                "voyage-code-2": 1536,
+                "voyage-lite-02-instruct": 1024,
+            }
+            return model_dimensions.get(self.model, 1536)
+
+        # sentence-transformers
+        try:
+            dim = int(self.client.get_sentence_embedding_dimension())
+            return dim
+        except Exception:
+            # fallback (BGE-large is 1024)
+            return 1024
     
     def get_stats(self) -> Dict[str, Any]:
         """

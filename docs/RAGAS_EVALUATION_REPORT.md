@@ -284,11 +284,11 @@ In addition to the real evaluation described above, a suite of **17 unit tests**
 
 **Fix:** Both the LLM and embeddings parameters were explicitly overridden when calling `evaluate()`. The LLM was set to `ChatAnthropic` wrapped in `LangchainLLMWrapper`. A custom `VoyageEmbeddings` class was implemented to satisfy RAGAS's embedding interface requirement.
 
-### 10.2 ANTHROPIC_API_KEY Not Loaded in Tests
+### 10.2 DASHSCOPE_API_KEY Not Loaded in Tests
 
-**Problem:** The `RAGASEvaluator` constructor called `os.environ.get("ANTHROPIC_API_KEY")` which returned `None` because the `.env` file was not being loaded.
+**Problem:** The `RAGASEvaluator` constructor called `os.environ.get("DASHSCOPE_API_KEY")` which returned `None` because the `.env` file was not being loaded.
 
-**Fix:** Added `load_dotenv()` at the top of `ragas_evaluator.py`. Added an explicit validation check that raises a clear `ValueError` if the key is missing, rather than letting it fail deep inside the `ChatAnthropic` constructor.
+**Fix:** Added `load_dotenv()` at the top of `ragas_evaluator.py`. Added an explicit validation check that raises a clear `ValueError` if the key is missing, rather than letting it fail deep inside the LLM constructor.
 
 ### 10.3 Unit Test Mocks Not Activating
 

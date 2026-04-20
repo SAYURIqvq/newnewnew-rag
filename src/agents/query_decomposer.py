@@ -4,11 +4,12 @@ Breaks complex queries into manageable sub-questions based on strategy.
 """
 
 from typing import List, Dict, Any
-from langchain_anthropic import ChatAnthropic
+from langchain_core.language_models.chat_models import BaseChatModel
 
 from src.agents.base_agent import BaseAgent
 from src.models.agent_state import AgentState, Strategy
 from src.config import get_settings
+from src.llm.qwen import create_qwen_chat_model
 from src.utils.exceptions import AgenticRAGException
 
 
@@ -20,9 +21,10 @@ class QueryDecomposerError(AgenticRAGException):
 class QueryDecomposer(BaseAgent):
     """Query Decomposer with strategy-aware logic."""
     
-    def __init__(self, llm: ChatAnthropic = None):
+    def __init__(self, llm: BaseChatModel = None):
         super().__init__(name="query_decomposer", version="1.0.0")
-        # ... (sama seperti sebelumnya)
+        settings = get_settings()
+        self.llm = llm or create_qwen_chat_model(settings, temperature=0.0, max_tokens=1000)
     
     def execute(self, state: AgentState) -> AgentState:
         """

@@ -64,14 +64,14 @@ The Planner Agent is the **Strategic Level 1** agent that analyzes query complex
 
 ### Basic Usage
 ```python
-from langchain_anthropic import ChatAnthropic
 from src.agents.planner import PlannerAgent
 from src.models.agent_state import AgentState
 from src.config import get_settings
+from src.llm.qwen import create_qwen_chat_model
 
 # Initialize
 settings = get_settings()
-llm = ChatAnthropic(api_key=settings.anthropic_api_key)
+llm = create_qwen_chat_model(settings)
 planner = PlannerAgent(llm=llm)
 
 # Analyze query

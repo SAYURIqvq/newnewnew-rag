@@ -701,8 +701,8 @@ def process_user_query(query: str):
     from src.agents.synthesis import SynthesisAgent
     from src.agents.writer import WriterAgent
     from src.agents.critic import CriticAgent
-    from langchain_anthropic import ChatAnthropic
     from src.config import get_settings
+    from src.llm.qwen import create_qwen_chat_model
     
     print("\n" + "="*60)
     print(f"🔍 Processing query: {query}")
@@ -721,10 +721,7 @@ def process_user_query(query: str):
     # ========== INITIALIZE AGENTS ==========
     with st.spinner("⚙️ Initializing workflow..."):
         settings = get_settings()
-        llm = ChatAnthropic(
-            model=settings.llm_model,
-            api_key=settings.anthropic_api_key
-        )
+        llm = create_qwen_chat_model(settings)
         
         # Initialize all agents
         planner = PlannerAgent(llm=llm)

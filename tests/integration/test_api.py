@@ -1,44 +1,45 @@
-"""Test API connections for Anthropic Claude and Voyage AI."""
+"""Test API connections for Qwen (DashScope) and local BGE-large embeddings."""
 
 import os
 from dotenv import load_dotenv
-from langchain_anthropic import ChatAnthropic
-from langchain_voyageai import VoyageAIEmbeddings
+from langchain_openai import ChatOpenAI
+os.environ.setdefault("TRANSFORMERS_NO_TF", "1")
+os.environ.setdefault("USE_TF", "0")
+from sentence_transformers import SentenceTransformer
 
 # Load environment variables
 load_dotenv()
 
 
-def test_anthropic():
-    """Test Anthropic Claude API."""
-    print("Testing Anthropic API...")
+def test_qwen():
+    """Test Qwen via DashScope compatible-mode."""
+    print("Testing Qwen (DashScope compatible-mode) ...")
     try:
-        llm = ChatAnthropic(
-            api_key=os.getenv("ANTHROPIC_API_KEY"),
-            model="claude-3-haiku-20240307",  # ← UPDATED MODEL NAME
-            temperature=0
+        llm = ChatOpenAI(
+            api_key=os.getenv("DASHSCOPE_API_KEY"),
+            base_url=os.getenv("QWEN_BASE_URL", "https://dashscope.aliyuncs.com/compatible-mode/v1"),
+            model=os.getenv("LLM_MODEL", "qwen-plus"),
+            temperature=0,
         )
         response = llm.invoke("Say 'Hello, RAG!'")
-        print(f"✅ Anthropic works! Response: {response.content}")
+        print(f"✅ Qwen works! Response: {response.content}")
         return True
     except Exception as e:
-        print(f"❌ Anthropic failed: {e}")
+        print(f"❌ Qwen failed: {e}")
         return False
 
 
-def test_voyage():
-    """Test Voyage AI embeddings."""
-    print("\nTesting Voyage AI...")
+def test_bge():
+    """Test local BGE-large embeddings."""
+    print("\nTesting BGE-large (Sentence-Transformers) ...")
     try:
-        embedder = VoyageAIEmbeddings(
-            voyage_api_key=os.getenv("VOYAGE_API_KEY"),
-            model="voyage-large-2"
-        )
-        embedding = embedder.embed_query("Hello, world!")
-        print(f"✅ Voyage AI works! Embedding dimension: {len(embedding)}")
+        model = os.getenv("EMBEDDING_MODEL", "BAAI/bge-large-en-v1.5")
+        st_model = SentenceTransformer(model)
+        embedding = st_model.encode(["Hello, world!"], normalize_embeddings=True)[0]
+        print(f"✅ BGE works! Embedding dimension: {len(embedding)}")
         return True
     except Exception as e:
-        print(f"❌ Voyage AI failed: {e}")
+        print(f"❌ BGE failed: {e}")
         return False
 
 
@@ -47,11 +48,11 @@ if __name__ == "__main__":
     print("API CONNECTION TESTS - Phase 1 Day 1")
     print("=" * 60)
     
-    anthropic_ok = test_anthropic()
-    voyage_ok = test_voyage()
+    qwen_ok = test_qwen()
+    bge_ok = test_bge()
     
     print("\n" + "=" * 60)
-    if anthropic_ok and voyage_ok:
+    if qwen_ok and bge_ok:
         print("✅ ALL TESTS PASSED! Ready to build RAG.")
         print("\nNext steps:")
         print("  1. Implement PDF loading")

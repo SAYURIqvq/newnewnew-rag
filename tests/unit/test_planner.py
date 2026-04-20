@@ -6,7 +6,7 @@ Tests complexity analysis, strategy selection, and LLM integration.
 
 import pytest
 from unittest.mock import Mock, MagicMock
-from langchain_anthropic import ChatAnthropic
+from langchain_core.language_models.chat_models import BaseChatModel
 
 from src.agents.planner import PlannerAgent
 from src.models.agent_state import AgentState, Strategy
@@ -20,7 +20,7 @@ def mock_llm():
     
     Returns mock that simulates Claude API responses.
     """
-    llm = Mock(spec=ChatAnthropic)
+    llm = Mock(spec=BaseChatModel)
     
     # Default response
     response = Mock()

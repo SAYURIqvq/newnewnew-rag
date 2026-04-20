@@ -8,11 +8,12 @@ Triggers regeneration if quality is below threshold.
 from typing import List, Dict, Any, Optional, Tuple
 from enum import Enum
 
-from langchain_anthropic import ChatAnthropic
+from langchain_core.language_models.chat_models import BaseChatModel
 
 from src.agents.base_agent import BaseAgent
 from src.models.agent_state import AgentState
 from src.config import get_settings
+from src.llm.qwen import create_qwen_chat_model
 from src.utils.logger import setup_logger
 from src.utils.exceptions import AgenticRAGException
 
@@ -59,7 +60,7 @@ class CriticAgent(BaseAgent):
     
     def __init__(
         self,
-        llm: Optional[ChatAnthropic] = None,
+        llm: Optional[BaseChatModel] = None,
         quality_threshold: float = 0.7,
         max_iterations: int = 3
     ):
@@ -72,8 +73,9 @@ class CriticAgent(BaseAgent):
             max_iterations: Max regeneration attempts
         
         Example:
-            >>> from langchain_anthropic import ChatAnthropic
-            >>> llm = ChatAnthropic(model="claude-3-haiku-20240307")
+            >>> from src.config import get_settings
+            >>> from src.llm.qwen import create_qwen_chat_model
+            >>> llm = create_qwen_chat_model(get_settings(), temperature=0.0)
             >>> agent = CriticAgent(llm=llm, quality_threshold=0.8)
         """
         super().__init__(name="critic", version="1.0.0")
@@ -82,11 +84,10 @@ class CriticAgent(BaseAgent):
         
         # Initialize LLM
         if llm is None:
-            self.llm = ChatAnthropic(
-                model=settings.llm_model,
+            self.llm = create_qwen_chat_model(
+                settings,
                 temperature=0.0,  # Deterministic for consistency
                 max_tokens=2000,
-                api_key=settings.anthropic_api_key
             )
         else:
             self.llm = llm

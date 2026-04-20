@@ -43,7 +43,7 @@ Query → Planner analyzes complexity
 
 ## 📊 RAGAS Evaluation Results
 
-Evaluated using the industry-standard **RAGAS framework**. LLM judge: Claude. Embeddings: Voyage AI.
+Evaluated using the industry-standard **RAGAS framework**. LLM judge: Qwen. Embeddings: Voyage AI.
 Answers were **generated at runtime** by the WriterAgent — not hand-written — so scores reflect real system output.
 
 | Test Case | Scenario | Faithfulness | Relevancy | Precision | Recall | Overall |
@@ -206,7 +206,7 @@ Relationship   (complexity > 0.7)   → Graph path finding → entity retrieval 
 ### Prerequisites
 
 ```
-Python 3.11+    Git    API keys: Anthropic + Voyage AI
+Python 3.11+    Git    API keys: DashScope (Qwen) + Voyage AI
 ```
 
 ### Installation
@@ -224,7 +224,7 @@ python -m spacy download en_core_web_md   # GraphRAG entity extraction
 
 cp .env.example .env
 # Fill in:
-#   ANTHROPIC_API_KEY=sk-ant-...
+#   DASHSCOPE_API_KEY=...
 #   VOYAGE_AI_API_KEY=pa-...
 ```
 
@@ -268,7 +268,7 @@ When information is not available, the system says so explicitly — it does not
 
 | Layer | Technology | Role |
 |-------|-----------|------|
-| LLM | Claude 3.5 Sonnet | Generation, validation, critique |
+| LLM | Qwen | Generation, validation, critique |
 | Embeddings | Voyage AI (`voyage-large-2-instruct`) | Semantic vectors |
 | Orchestration | LangChain + LangGraph | Agent wiring, state-machine workflows |
 | Vector DB | ChromaDB | Persistent vector storage |
@@ -312,7 +312,7 @@ agentic-rag-system/
 │   │   ├── chroma_store.py
 │   │   └── database.py
 │   ├── evaluation/                  # Quality measurement
-│   │   ├── ragas_evaluator.py       # RAGAS (Claude + Voyage override)
+│   │   ├── ragas_evaluator.py       # RAGAS (Qwen + Voyage override)
 │   │   └── simple_evaluator.py      # Lightweight rule-based metrics
 │   ├── orchestration/               # LangGraph workflows
 │   ├── models/                      # Pydantic data models
@@ -353,7 +353,7 @@ pytest tests/e2e/                                    # end-to-end tests
 # RAGAS pipeline — mocked, no API cost
 pytest tests/evaluation/test_ragas_evaluation.py -v  # 17 tests
 
-# RAGAS — live scores (calls Claude + Voyage)
+# RAGAS — live scores (calls Qwen + Voyage)
 python tests/evaluation/test_ragas_real.py
 
 # Ablation study
@@ -396,7 +396,7 @@ MIT License — see [LICENSE](LICENSE)
 
 ## 🙏 Acknowledgments
 
-- **Anthropic** — Claude 3.5 Sonnet
+- **Alibaba Cloud DashScope** — Qwen
 - **Voyage AI** — Embedding model
 - **Microsoft Research** — GraphRAG methodology
 - **LangChain / LangGraph** — Orchestration framework

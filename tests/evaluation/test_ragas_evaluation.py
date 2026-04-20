@@ -37,14 +37,14 @@ BAD_SCORES = {
 @pytest.fixture
 def evaluator():
     """
-    Mock ChatAnthropic dan LangchainLLMWrapper
+    Mock Qwen LLM factory dan LangchainLLMWrapper
     SEBELUM import RAGASEvaluator.
     """
-    with patch("src.evaluation.ragas_evaluator.ChatAnthropic") as mock_chat, \
+    with patch("src.evaluation.ragas_evaluator.create_qwen_chat_model") as mock_factory, \
          patch("src.evaluation.ragas_evaluator.LangchainLLMWrapper") as mock_wrapper:
 
-        # Mock ChatAnthropic return value
-        mock_chat.return_value = MagicMock()
+        # Mock Qwen factory return value
+        mock_factory.return_value = MagicMock()
         mock_wrapper.return_value = MagicMock()
 
         from src.evaluation.ragas_evaluator import RAGASEvaluator

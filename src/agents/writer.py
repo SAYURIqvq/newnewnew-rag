@@ -8,11 +8,12 @@ Uses LLM to synthesize information into coherent responses.
 from typing import List, Dict, Any, Optional
 import re
 
-from langchain_anthropic import ChatAnthropic
+from langchain_core.language_models.chat_models import BaseChatModel
 
 from src.agents.base_agent import BaseAgent
 from src.models.agent_state import AgentState, Chunk
 from src.config import get_settings
+from src.llm.qwen import create_qwen_chat_model
 from src.utils.logger import setup_logger
 from src.utils.exceptions import AgenticRAGException
 
@@ -53,7 +54,7 @@ class WriterAgent(BaseAgent):
     
     def __init__(
         self,
-        llm: Optional[ChatAnthropic] = None,
+        llm: Optional[BaseChatModel] = None,
         max_tokens: int = None,
         temperature: float = None,
         include_sources: bool = True
@@ -68,8 +69,9 @@ class WriterAgent(BaseAgent):
             include_sources: Include source list in answer
         
         Example:
-            >>> from langchain_anthropic import ChatAnthropic
-            >>> llm = ChatAnthropic(model="claude-3-5-sonnet-20241022")
+            >>> from src.config import get_settings
+            >>> from src.llm.qwen import create_qwen_chat_model
+            >>> llm = create_qwen_chat_model(get_settings())
             >>> agent = WriterAgent(llm=llm)
         """
         super().__init__(name="writer", version="1.0.0")
@@ -78,11 +80,10 @@ class WriterAgent(BaseAgent):
         
         # Initialize LLM
         if llm is None:
-            self.llm = ChatAnthropic(
-                model=settings.llm_model,
-                temperature=temperature or settings.llm_temperature,
-                max_tokens=max_tokens or settings.llm_max_tokens,
-                api_key=settings.anthropic_api_key
+            self.llm = create_qwen_chat_model(
+                settings,
+                temperature=temperature,
+                max_tokens=max_tokens,
             )
         else:
             self.llm = llm

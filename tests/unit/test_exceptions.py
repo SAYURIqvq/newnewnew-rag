@@ -224,11 +224,11 @@ class TestConfigurationError:
         """Test configuration error with config key"""
         exc = ConfigurationError(
             message="Missing API key",
-            config_key="ANTHROPIC_API_KEY"
+            config_key="DASHSCOPE_API_KEY"
         )
         
-        assert exc.config_key == "ANTHROPIC_API_KEY"
-        assert "ANTHROPIC_API_KEY" in str(exc)
+        assert exc.config_key == "DASHSCOPE_API_KEY"
+        assert "DASHSCOPE_API_KEY" in str(exc)
     
     def test_configuration_error_full(self):
         """Test configuration error with all parameters"""

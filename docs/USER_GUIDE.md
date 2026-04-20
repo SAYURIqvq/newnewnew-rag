@@ -92,7 +92,7 @@ nano .env  # or use any text editor
 
 **Add your keys to `.env`:**
 ```
-ANTHROPIC_API_KEY=sk-ant-xxxxx
+DASHSCOPE_API_KEY=your_dashscope_key_here
 VOYAGE_API_KEY=pa-xxxxx
 ```
 

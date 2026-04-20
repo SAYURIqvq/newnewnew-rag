@@ -19,8 +19,8 @@ from src.agents.synthesis import SynthesisAgent
 from src.models.agent_state import AgentState
 from src.utils.citation_utils import CitationUtils
 
-from langchain_anthropic import ChatAnthropic
 from src.config import get_settings
+from src.llm.qwen import create_qwen_chat_model
 
 
 def test_writer():
@@ -32,11 +32,7 @@ def test_writer():
     
     # Initialize
     settings = get_settings()
-    llm = ChatAnthropic(
-        model=settings.llm_model,
-        temperature=0.3,
-        api_key=settings.anthropic_api_key
-    )
+    llm = create_qwen_chat_model(settings, temperature=0.3)
     
     # Test queries
     test_queries = [
@@ -165,11 +161,7 @@ def test_writer_with_mock():
     
     # Generate answer
     settings = get_settings()
-    llm = ChatAnthropic(
-        model=settings.llm_model,
-        temperature=0.3,
-        api_key=settings.anthropic_api_key
-    )
+    llm = create_qwen_chat_model(settings, temperature=0.3)
     
     writer = WriterAgent(llm=llm)
     state = AgentState(query=query, chunks=chunks)

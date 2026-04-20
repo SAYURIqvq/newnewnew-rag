@@ -5,8 +5,6 @@ Demonstrates how to use the complete Agentic RAG workflow
 with all agents coordinated through LangGraph.
 """
 
-from langchain_anthropic import ChatAnthropic
-
 from src.orchestration.langgraph_workflow import AgenticRAGWorkflow
 from src.agents.planner import PlannerAgent
 from src.agents.validator import ValidatorAgent
@@ -15,6 +13,7 @@ from src.agents.retrieval.vector_agent import VectorSearchAgent
 from src.agents.retrieval.keyword_agent import KeywordSearchAgent
 from src.agents.retrieval.graph_agent import GraphSearchAgent
 from src.config import get_settings
+from src.llm.qwen import create_qwen_chat_model
 
 
 def main():
@@ -32,11 +31,7 @@ def main():
     print("-" * 70)
     
     # Initialize LLM
-    llm = ChatAnthropic(
-        model=settings.llm_model,
-        temperature=settings.llm_temperature,
-        api_key=settings.anthropic_api_key
-    )
+    llm = create_qwen_chat_model(settings)
     print(f"✓ LLM: {settings.llm_model}")
     
     # Initialize agents
@@ -160,11 +155,7 @@ def demo_retry_scenario():
     print()
     
     settings = get_settings()
-    llm = ChatAnthropic(
-        model=settings.llm_model,
-        temperature=settings.llm_temperature,
-        api_key=settings.anthropic_api_key
-    )
+    llm = create_qwen_chat_model(settings)
     
     # Create workflow with stricter validator (higher threshold)
     planner = PlannerAgent(llm=llm)
@@ -210,11 +201,7 @@ def demo_different_strategies():
     print()
     
     settings = get_settings()
-    llm = ChatAnthropic(
-        model=settings.llm_model,
-        temperature=settings.llm_temperature,
-        api_key=settings.anthropic_api_key
-    )
+    llm = create_qwen_chat_model(settings)
     
     planner = PlannerAgent(llm=llm)
     validator = ValidatorAgent(llm=llm)

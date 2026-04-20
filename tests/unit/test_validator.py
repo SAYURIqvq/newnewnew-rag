@@ -6,7 +6,7 @@ Tests chunk validation, sufficiency scoring, and decision logic.
 
 import pytest
 from unittest.mock import Mock
-from langchain_anthropic import ChatAnthropic
+from langchain_core.language_models.chat_models import BaseChatModel
 
 from src.agents.validator import ValidatorAgent
 from src.models.agent_state import AgentState, Chunk
@@ -16,7 +16,7 @@ from src.utils.exceptions import ValidationError
 @pytest.fixture
 def mock_llm():
     """Create mock LLM for testing."""
-    llm = Mock(spec=ChatAnthropic)
+    llm = Mock(spec=BaseChatModel)
     
     # Default response for relevance check
     response = Mock()
