@@ -1,53 +1,53 @@
 {
-  "description": "Thesis evaluation set. Replace ground_truth with facts from YOUR uploaded documents.",
+  "description": "Generic thesis evaluation set for uploaded documents. Questions are intentionally document-grounded so RAG quality can be measured without relying on external knowledge.",
   "test_cases": [
     {
-      "question": "What is the main topic of the document?",
-      "ground_truth": "Replace with a one-sentence summary from your document.",
+      "question": "What is the main topic of the uploaded document?",
+      "ground_truth": "A one-sentence topic summary grounded in the uploaded document.",
       "difficulty": "easy",
-      "category": "definition"
+      "category": "summary"
     },
     {
-      "question": "What are the key points or findings presented?",
-      "ground_truth": "Replace with bullet facts from your document.",
+      "question": "Summarize the key points stated in the uploaded document.",
+      "ground_truth": "The answer should list the central points that appear in the uploaded document.",
+      "difficulty": "medium",
+      "category": "summary"
+    },
+    {
+      "question": "What specific facts, figures, names, or dates are mentioned in the uploaded document?",
+      "ground_truth": "The answer should extract concrete details from the uploaded document.",
+      "difficulty": "medium",
+      "category": "fact_extraction"
+    },
+    {
+      "question": "What methods, processes, qualifications, or experiences are described in the uploaded document?",
+      "ground_truth": "The answer should describe procedures, methods, qualifications, or experience from the uploaded document.",
       "difficulty": "medium",
       "category": "explanation"
     },
     {
-      "question": "How does the document define the core concept?",
-      "ground_truth": "Replace with the definition sentence from your document.",
-      "difficulty": "easy",
-      "category": "definition"
-    },
-    {
-      "question": "What methods or approaches are described?",
-      "ground_truth": "Replace with method names from your document.",
-      "difficulty": "medium",
-      "category": "process"
-    },
-    {
-      "question": "What limitations or challenges are mentioned?",
-      "ground_truth": "Replace with limitation text from your document.",
+      "question": "What limitations, challenges, requirements, or conditions are mentioned in the uploaded document?",
+      "ground_truth": "The answer should identify constraints or requirements stated in the uploaded document.",
       "difficulty": "hard",
-      "category": "explanation"
+      "category": "analysis"
     },
     {
-      "question": "Compare the two main ideas discussed in the document.",
-      "ground_truth": "Replace with comparison content from your document.",
+      "question": "Compare the two most important ideas or sections in the uploaded document.",
+      "ground_truth": "The answer should compare two document-grounded ideas, sections, roles, methods, or claims.",
       "difficulty": "hard",
       "category": "comparison"
     },
     {
-      "question": "What is artificial intelligence?",
-      "ground_truth": "Artificial intelligence is the simulation of human intelligence processes by machines, especially computer systems.",
-      "difficulty": "easy",
-      "category": "definition"
+      "question": "Which evidence from the uploaded document best supports its main message?",
+      "ground_truth": "The answer should cite evidence from the document that supports the main message.",
+      "difficulty": "medium",
+      "category": "evidence"
     },
     {
-      "question": "What is the purpose of RAG in AI systems?",
-      "ground_truth": "Retrieval-Augmented Generation combines retrieval with generation to ground answers in documents.",
+      "question": "What information is missing or unclear in the uploaded document?",
+      "ground_truth": "The answer should honestly identify missing or unclear information based only on the document.",
       "difficulty": "hard",
-      "category": "concept"
+      "category": "missing_information"
     }
   ]
 }

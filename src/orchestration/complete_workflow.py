@@ -571,7 +571,22 @@ class CompleteAgenticRAGWorkflow:
             final_state = self.workflow.invoke(initial_state)
             
             # Extract agent state and run final deterministic reliability gate.
-            final_agent_state = self.reliability_gate.apply(final_state["agent_state"])
+            final_agent_state = final_state["agent_state"]
+            final_agent_state = self.reliability_gate.apply(final_agent_state)
+
+            if (
+                not final_agent_state.metadata.get("reliability_gate", {}).get("passed")
+                and final_agent_state.chunks
+            ):
+                self.logger.warning(
+                    "Reliability gate failed; using deterministic cited evidence summary"
+                )
+                final_agent_state.answer = self.writer.generate_context_summary(
+                    final_agent_state.query,
+                    final_agent_state.chunks,
+                )
+                final_agent_state = self.reliability_gate.apply(final_agent_state)
+                final_agent_state.metadata["reliability_gate"]["fallback_used"] = True
             
             critic_score = final_agent_state.critic_score
             critic_score_label = f"{critic_score:.2f}" if critic_score is not None else "N/A"

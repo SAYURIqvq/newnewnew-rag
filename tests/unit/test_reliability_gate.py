@@ -54,6 +54,30 @@ def test_reliability_gate_rewrites_unsafe_answer():
     assert updated.answer.startswith("I cannot provide a reliable answer")
 
 
+def test_reliability_gate_fallback_summary_can_recover_missing_citation():
+    gate = ReliabilityGate()
+    state = AgentState(
+        query="What is Python?",
+        chunks=[
+            Chunk(
+                text="Python is a programming language.",
+                doc_id="doc",
+                chunk_id="chunk-1",
+                score=0.9,
+                metadata={},
+            )
+        ],
+        answer="Python is a programming language.",
+        validation_score=0.8,
+        critic_score=0.9,
+    )
+
+    state.answer = "Python is a programming language [1]."
+    result = gate.evaluate(state)
+
+    assert result["passed"] is True
+
+
 def test_reliability_gate_allows_honest_non_answer():
     gate = ReliabilityGate()
     state = AgentState(

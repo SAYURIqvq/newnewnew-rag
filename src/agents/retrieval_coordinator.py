@@ -117,6 +117,7 @@ class RetrievalCoordinator(BaseAgent):
         """
         try:
             query = state.query
+            retrieval_queries = state.sub_queries or [query]
             current_round = state.retrieval_round
             
             self.log(
@@ -125,7 +126,15 @@ class RetrievalCoordinator(BaseAgent):
             )
             
             # Step 1: Spawn retrieval swarm
-            all_results, swarm_metadata = self._spawn_swarm_with_metadata(query)
+            all_results = []
+            query_metadata = []
+            for retrieval_query in retrieval_queries:
+                query_results, swarm_metadata = self._spawn_swarm_with_metadata(retrieval_query)
+                all_results.extend(query_results)
+                query_metadata.append({
+                    "query": retrieval_query,
+                    **swarm_metadata,
+                })
             
             self.log(
                 f"Retrieved {len(all_results)} total chunks from swarm",
@@ -159,7 +168,8 @@ class RetrievalCoordinator(BaseAgent):
                 "unique_chunks": len(unique_chunks),
                 "final_chunks": len(top_chunks),
                 "parallel": self.parallel,
-                **swarm_metadata,
+                "query_count": len(retrieval_queries),
+                "query_breakdown": query_metadata,
             }
             
             return state

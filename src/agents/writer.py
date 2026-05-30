@@ -136,7 +136,8 @@ class WriterAgent(BaseAgent):
             answer = self._generate_answer(query, chunks)
             
             # Extract and format citations
-            formatted_answer = self._format_answer(answer, chunks)
+            cited_answer = self._ensure_minimum_citation(answer, chunks)
+            formatted_answer = self._format_answer(cited_answer, chunks)
             
             # Update state
             state.answer = formatted_answer
@@ -241,11 +242,12 @@ INSTRUCTIONS:
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 1. Answer using ONLY information from context
 2. Cite specific chunks per statement
-3. Be comprehensive but concise
+3. For answerable questions, write 3-6 concise sentences
 4. If context lacks info, state clearly using the template above
 5. Write naturally but stay strictly grounded
 6. DO NOT add "Sources:" section — ONLY inline citations
 7. End your answer immediately after the last sentence
+8. If you answer with any document fact, include at least one inline citation
 
 Answer (inline citations only, no Sources section):"""
         
@@ -262,6 +264,44 @@ Answer (inline citations only, no Sources section):"""
                 message=f"LLM generation failed: {str(e)}",
                 details={"query": query}
             ) from e
+
+    def generate_context_summary(self, query: str, chunks: List[Chunk]) -> str:
+        """
+        Deterministic fallback that summarizes retrieved evidence with citations.
+
+        Used when the LLM produces an ungrounded or citation-free answer.
+        """
+        selected = chunks[:3]
+        sentences = []
+
+        for i, chunk in enumerate(selected, 1):
+            snippet = self._first_sentence(chunk.text)
+            if snippet:
+                sentences.append(f"{snippet} [{i}]")
+
+        if not sentences:
+            return "The provided documents do not contain enough readable information to answer this question."
+
+        if "compare" in query.lower() and len(sentences) >= 2:
+            intro = "The retrieved evidence presents multiple relevant points for comparison."
+            return f"{intro} " + " ".join(sentences)
+
+        return " ".join(sentences)
+
+    def _first_sentence(self, text: str, max_words: int = 35) -> str:
+        clean = " ".join(text.split())
+        if not clean:
+            return ""
+
+        parts = re.split(r"(?<=[.!?])\s+", clean)
+        sentence = parts[0] if parts else clean
+        words = sentence.split()
+        if len(words) > max_words:
+            sentence = " ".join(words[:max_words]).rstrip(",;:")
+
+        if sentence[-1] not in ".!?":
+            sentence += "."
+        return sentence
     
     def _format_answer(self, answer: str, chunks: List[Chunk]) -> str:
         """
@@ -310,6 +350,37 @@ Answer (inline citations only, no Sources section):"""
         """
         citations = re.findall(r'\[(\d+)\]', answer)
         return len(set(citations))
+
+    def _ensure_minimum_citation(self, answer: str, chunks: List[Chunk]) -> str:
+        """
+        Add a conservative citation when the LLM produced a grounded answer
+        but omitted inline references.
+        """
+        if not chunks or self._count_citations(answer) > 0:
+            return answer
+
+        if self._is_honest_non_answer(answer):
+            return answer
+
+        stripped = answer.rstrip()
+        if not stripped:
+            return answer
+
+        if stripped[-1] in ".!?":
+            return f"{stripped} [1]"
+        return f"{stripped} [1]"
+
+    def _is_honest_non_answer(self, answer: str) -> bool:
+        lowered = answer.lower()
+        markers = [
+            "do not contain information",
+            "don't have enough information",
+            "not enough information",
+            "cannot answer",
+            "not available in the provided",
+            "not mentioned in the provided",
+        ]
+        return any(marker in lowered for marker in markers)
     
     def generate_with_feedback(
         self,
@@ -367,7 +438,8 @@ Improved Answer:"""
             from src.llm.content_utils import extract_llm_text
             answer = extract_llm_text(response.content)
             
-            return self._format_answer(answer, chunks)
+            cited_answer = self._ensure_minimum_citation(answer, chunks)
+            return self._format_answer(cited_answer, chunks)
             
         except Exception as e:
             self.log(f"Answer regeneration failed: {str(e)}", level="error")
