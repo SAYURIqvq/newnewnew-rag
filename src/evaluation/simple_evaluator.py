@@ -64,9 +64,10 @@ class SimpleEvaluator:
         scores['context_usage_rate'] = chunks_used / min(len(chunks), 5) if chunks else 0.0
         
         # 4. Self-Reflection Metrics
-        reflection = metadata.get('self_reflection', {})
+        # Accept either the full workflow metadata or the self_reflection sub-dict.
+        reflection = metadata.get('self_reflection', metadata)
         scores['iterations'] = reflection.get('iterations', 0)
-        scores['final_score'] = reflection.get('final_score', 0.0)
+        scores['final_score'] = reflection.get('final_score') or 0.0
         scores['was_improved'] = 1.0 if reflection.get('improved', False) else 0.0
         
         # 5. Overall Quality Score (weighted average)

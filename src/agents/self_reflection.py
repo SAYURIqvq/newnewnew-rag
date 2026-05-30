@@ -126,7 +126,7 @@ class SelfReflectionLoop:
             "iterations": iteration,
             "final_score": state.critic_score,
             "final_decision": state.critic_decision.value,
-            "improved": iteration > 0
+            "improved": state.metadata.get("regeneration_count", 0) > 0
         }
         
         self.logger.info(
