@@ -1,231 +1,201 @@
-# 🤖 Agentic RAG System
+# Agentic RAG System
 
-**Advanced Multi-Agent RAG with Self-Reflection, GraphRAG, and Adaptive Reasoning**
+**A Hierarchical Multi-Agent Framework for Reliable RAG with Self-Reflection and Graph-Based Reasoning**
 
-[![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
+[![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Tests](https://img.shields.io/badge/tests-82%20passing-brightgreen.svg)]()
-[![Coverage](https://img.shields.io/badge/coverage-92%25-green.svg)]()
+[![Tests](https://img.shields.io/badge/tests-230+-brightgreen.svg)]()
 
-An intelligent document Q&A system that goes beyond traditional RAG by implementing a hierarchical multi-agent architecture with self-reflection, graph-based reasoning, and adaptive query strategies.
+An intelligent document Q&A system built on a hierarchical multi-agent architecture with self-reflection, graph-based reasoning, and adaptive query strategies.
 
 ---
 
-## 🎯 What Makes This Different?
+## What Makes This Different
 
-**Traditional RAG (95% of implementations):**
+**Traditional RAG:**
 ```
 Query → Retrieve chunks → Generate answer
 
-❌ Fixed pipeline, no intelligence
-❌ No quality checks on retrieval or generation
-❌ Cannot reason about relationships between entities
-❌ Hallucinations go undetected
+- Fixed pipeline
+- No quality checks on retrieval or generation
+- Cannot reason about relationships between entities
+- Hallucinations go undetected
 ```
 
-**Agentic RAG (this project):**
+**This system:**
 ```
-Query → Planner analyzes complexity
-      → Adaptive retrieval (vector + keyword + graph in parallel)
+Query → Planner analyses complexity
+      → Adaptive retrieval (vector + keyword in parallel)
       → Validator checks retrieval quality, retries if needed
-      → Writer generates answer grounded strictly in context
+      → Synthesis deduplicates and ranks across sources
+      → Writer generates answer grounded in context
       → Critic reviews quality, triggers regeneration if needed
-      → Final answer with full citation trail
+      → Reliability Gate performs final grounding check
+      → Answer with full citation trail
 
-✅ Adaptive decisions based on query complexity
-✅ Self-reflection with automatic quality correction
-✅ Relationship reasoning via knowledge graphs
-✅ Zero hallucination — Faithfulness 1.000 on RAGAS
-✅ Honest when information is not available
+- Adaptive decisions based on query complexity
+- Self-reflection with automatic quality correction
+- Relationship reasoning via knowledge graph
+- Runtime reliability gate catches grounding failures
+- Honest when information is not available
 ```
 
 ---
 
-## 📊 RAGAS Evaluation Results
+## Key Features
 
-Evaluated using the industry-standard **RAGAS framework**. LLM judge: DeepSeek. Embeddings: BGE-large.
-Answers were **generated at runtime** by the WriterAgent — not hand-written — so scores reflect real system output.
+### Multi-Agent Architecture (10 agents, 3 hierarchical levels)
 
-| Test Case | Scenario | Faithfulness | Relevancy | Precision | Recall | Overall |
-|-----------|----------|:------------:|:---------:|:---------:|:------:|:-------:|
-| Case 1 | Complete info available | **1.000** | 0.925 | 1.000 | 1.000 | **0.981** |
-| Case 2 | Partial info (some data missing) | **1.000** | 0.000 † | 1.000 | 1.000 | 0.750 |
-| Case 3 | Info completely missing | **1.000** | 0.000 † | 1.000 | 1.000 | 0.750 |
+**Strategic Layer (L1)**
+- **Planner** — Analyses query complexity (0.0–1.0), selects strategy (Simple / Multi-hop / Graph)
 
-> † Relevancy is 0.000 on Cases 2–3 because RAGAS penalises answers that don't deliver requested data.
-> In both cases the system **correctly refused to fabricate** and stated the information was unavailable.
-> This is intended behaviour — the production gate treats these as valid responses.
-
-### Why Faithfulness is the key number
-
-Faithfulness measures whether every claim in the answer is grounded in the retrieved context.
-**1.000 = zero hallucination.** This is the single most important metric for a production RAG system,
-and it holds across all three scenarios — including the cases where information is missing.
-
-### Production Gate
-
-| Gate | Threshold | Logic |
-|------|-----------|-------|
-| Hard gate | Faithfulness ≥ 0.5 | Blocks any hallucinated answer regardless of other scores |
-| Soft gate | Overall ≥ 0.7 | Skipped automatically when an honest non-answer is detected |
-
-RAGAS evaluation unit tests: **17/17 passing** (mocked, zero API cost).
-
-Full details → [docs/RAGAS_EVALUATION_REPORT.md](docs/RAGAS_EVALUATION_REPORT.md)
-
----
-
-## ✨ Key Features
-
-### 🧠 Multi-Agent System (10 Core Agents + Reliability Gate, 3 Levels)
-
-**Strategic Layer**
-- **Planner** — Analyzes query complexity (0.0–1.0), selects strategy (Simple / Multi-hop / Graph)
-
-**Tactical Layer**
+**Tactical Layer (L2)**
+- **Query Decomposer** — Breaks complex multi-aspect questions into focused sub-queries
 - **Retrieval Coordinator** — Spawns and manages swarm agents in parallel
-- **Query Decomposer** — Breaks complex multi-aspect questions into focused sub-questions
 - **Validator** — Quality gate; checks chunk sufficiency, triggers re-retrieval if needed
 - **Synthesis** — Deduplicates across retrieval methods, applies hybrid scoring
 - **Writer** — Generates answers grounded strictly in context with inline citations
 - **Critic** — Reviews quality on 5 dimensions, regenerates with feedback if needed
-- **Reliability Gate** — Final deterministic grounding check for citations and prior quality scores
 
-**Operational Layer (Swarm — runs in parallel)**
+**Operational Layer (L3 — Swarm, runs in parallel)**
 - **Vector Agent** — Semantic search via BGE embeddings
 - **Keyword Agent** — Exact-match BM25 scoring
 - **Graph Agent** — Relationship reasoning via knowledge-graph path finding
 
----
-
-### 🕸️ GraphRAG
-
-Builds searchable knowledge graphs directly from uploaded documents:
-
-- Entity extraction (spaCy NER)
-- Relationship extraction — 3 methods: co-occurrence, dependency parsing, pattern matching
-- Graph construction (NetworkX) — tested at 35 nodes, 621 edges
-- Path finding for relationship queries
-
-```
-"How does TensorFlow relate to neural networks?"
-→ Path found: TensorFlow --[used_for]--> neural networks
-→ Retrieves chunks explaining the connection
-→ 85% accuracy (vs 30% with vector search alone)
-```
+**Reliability Gate** — Final deterministic check for citations, context grounding, and prior agent scores before the answer reaches the user.
 
 ---
 
-### 🔄 Self-Reflection Loop
+### Self-Reflection Loop
 
 Two-stage quality check before an answer reaches the user:
 
 **Stage 1 — Retrieval (Validator)**
 ```
-Chunks retrieved → score relevance + coverage + confidence
-  ≥ 0.7 → proceed          < 0.7 → re-retrieve (max 3 retries)
+Chunks retrieved → score relevance, coverage, confidence
+  score ≥ 0.7 → proceed
+  score < 0.7 → re-retrieve (max 2 retries)
 ```
 
 **Stage 2 — Generation (Critic)**
 ```
 Answer generated → score on 5 dimensions
   Accuracy 30% | Completeness 25% | Citations 15% | Clarity 15% | Relevance 15%
-  ≥ 0.7 → approve          < 0.7 → regenerate with feedback (max 3 iterations)
-```
-
-Net result: success rate **85% → 99%** with self-correction.
-
----
-
-### 📊 Adaptive Strategy Selection
-
-```
-Simple query   (complexity < 0.3)   → Vector search → direct generation       ~2–3 s
-Complex query  (complexity 0.3–0.7) → Decompose → parallel retrieval → synth  ~4–6 s
-Relationship   (complexity > 0.7)   → Graph path finding → entity retrieval   ~4–6 s
+  score ≥ threshold → approve
+  score < threshold → regenerate with feedback (max 3 iterations)
 ```
 
 ---
 
-## 📈 Performance Metrics
+### Graph-Based Reasoning
 
-| Metric | Baseline | Current | Δ |
-|--------|:--------:|:-------:|:-:|
-| Accuracy | 60% | 85–92% | +32% |
-| Latency (simple) | 10 s | 2–3 s | 5× faster |
-| Latency (complex) | 10 s | 4–6 s | 2× faster |
-| Relationship queries | 30% | 85% | +55% |
-| Self-correction rate | 0% | 85–99% | new |
-| **Faithfulness (RAGAS)** | — | **1.000** | zero hallucination |
+Builds searchable knowledge graphs directly from uploaded documents:
 
-**Ablation study highlights:**
-
-- Remove graph search → relationship accuracy drops **19×**
-- Remove hierarchical chunking → retrieval **45% slower**
-- Remove self-reflection → success rate drops 99% → 85%
-
----
-
-## 🏗️ Architecture
+- Entity extraction (spaCy NER)
+- Relationship extraction — co-occurrence, dependency parsing, pattern matching
+- Graph construction (NetworkX)
+- Path finding for relationship queries
 
 ```
-┌─────────────────────────────────────────────────┐
-│            USER INTERFACE (Streamlit)           │
-└──────────────────────┬──────────────────────────┘
-                       ▼
-┌─────────────────────────────────────────────────┐
-│              PLANNER AGENT  (L1)                │
-│        complexity analysis → strategy pick      │
-└──────────────────────┬──────────────────────────┘
-          ┌────────────┼────────────┐
-          ▼            ▼            ▼
-   ┌────────────┐ ┌──────────┐ ┌──────────┐
-   │ Vector     │ │ Keyword  │ │ Graph    │   L3 — Swarm (parallel)
-   │ Agent      │ │ Agent    │ │ Agent    │
-   └─────┬──────┘ └────┬─────┘ └────┬─────┘
-         └─────────────┼────────────┘
-                       ▼
-┌─────────────────────────────────────────────────┐
-│          SYNTHESIS  (dedupe + hybrid rank)      │   L2 — Tactical
-└──────────────────────┬──────────────────────────┘
-                       ▼
-┌─────────────────────────────────────────────────┐
-│          VALIDATOR  (quality gate → retry?)     │
-└──────────────────────┬──────────────────────────┘
-                       ▼
-┌─────────────────────────────────────────────────┐
-│          WRITER → CRITIC  (generate → review)   │
-└──────────────────────┬──────────────────────────┘
-                       ▼
-              Final Answer + Citations
+"How does X relate to Y?"
+→ Path found: X --[relation]--> Z --[relation]--> Y
+→ Retrieves chunks along the path
+→ Answer includes graph reasoning evidence
 ```
 
 ---
 
-## 🚀 Quick Start
+### Adaptive Strategy Selection
+
+```
+Simple query   (complexity < 0.3)   → Vector search → direct generation
+Complex query  (complexity 0.3–0.7) → Decompose → parallel retrieval → synthesis
+Relationship   (complexity > 0.7)   → Graph path finding → entity retrieval
+```
+
+---
+
+## Architecture
+
+```
+                          ┌──────────────────────┐
+                          │   USER (Streamlit)    │
+                          └───────────┬──────────┘
+                                      ▼
+                          ┌──────────────────────┐
+                          │      PLANNER (L1)     │
+                          │  complexity → strategy │
+                          └───────────┬──────────┘
+                                      ▼
+                          ┌──────────────────────┐
+                          │  QUERY DECOMPOSER (L2)│
+                          └───────────┬──────────┘
+                                      ▼
+                    ┌─────────────────┼─────────────────┐
+                    ▼                 ▼                   ▼
+             ┌──────────┐     ┌──────────┐       ┌──────────┐
+             │ Vector   │     │ Keyword  │       │ Graph    │   L3 Swarm
+             │ Agent    │     │ Agent    │       │ Agent    │   (parallel)
+             └────┬─────┘     └────┬─────┘       └────┬─────┘
+                  └───────────────┼───────────────────┘
+                                  ▼
+                    ┌──────────────────────┐
+                    │     VALIDATOR (L2)    │
+                    │  quality gate → retry? │◄──────────┐
+                    └───────────┬──────────┘            │
+                                ▼ (proceed)              │ (retry)
+                    ┌──────────────────────┐            │
+                    │    SYNTHESIS (L2)     │            │
+                    │  dedupe + hybrid rank │            │
+                    └───────────┬──────────┘            │
+                                ▼                        │
+                    ┌──────────────────────┐            │
+                    │     WRITER (L2)       │            │
+                    │  generate + citations  │◄─────┐    │
+                    └───────────┬──────────┘      │    │
+                                ▼                   │    │
+                    ┌──────────────────────┐      │    │
+                    │     CRITIC (L2)       │      │    │
+                    │  review → regenerate? │──────┘    │
+                    └───────────┬──────────┘            │
+                                ▼ (approved)             │
+                    ┌──────────────────────┐            │
+                    │  RELIABILITY GATE     │            │
+                    │  final grounding check │            │
+                    └───────────┬──────────┘            │
+                                ▼                        │
+                    ┌──────────────────────┐            │
+                    │  Answer + Citations   │            │
+                    └──────────────────────┘            │
+                                                        │
+              ┌─────────────────────────────────────────┘
+              │  Retry loop: Validator sends back to Retrieval
+              │  Self-reflection loop: Critic sends back to Writer
+```
+
+---
+
+## Quick Start
 
 ### Prerequisites
 
-```
-Python 3.11+    Git    API key: DeepSeek-compatible chat model
-```
+Python 3.12+, Git, DeepSeek-compatible API key
 
 ### Installation
 
 ```bash
-git clone https://github.com/yourusername/agentic-rag-system.git
-cd agentic-rag-system
+git clone https://github.com/SAYURIqvq/newnewnew-rag.git
+cd newnewnew-rag
 
 python -m venv venv
 source venv/bin/activate            # Windows: venv\Scripts\activate
 
 pip install -r requirements.txt
-
-python -m spacy download en_core_web_md   # GraphRAG entity extraction
+python -m spacy download en_core_web_md
 
 cp .env.example .env
 # Fill in:
-#   ANTHROPIC_AUTH_TOKEN=...
+#   ANTHROPIC_AUTH_TOKEN=your_deepseek_api_key
 #   ANTHROPIC_BASE_URL=https://api.deepseek.com/anthropic
 #   EMBEDDING_MODEL=BAAI/bge-large-en-v1.5
 ```
@@ -239,34 +209,33 @@ streamlit run app.py
 
 ---
 
-## 📖 Usage
+## Usage
 
 ### 1. Upload a Document
 
-Supports **PDF, DOCX, TXT**. Processing is fully automatic:
+Supports PDF, DOCX, TXT. Processing is fully automatic:
 text extraction → hierarchical chunking → embeddings → vector store → entity extraction → knowledge graph → BM25 index.
 
 ### 2. Ask Questions
 
 ```
 Simple:        "What is machine learning?"
-               → fast path, 2–3 s
+               → fast path
 
 Relationship:  "How does TensorFlow relate to neural networks?"
-               → graph reasoning, 4–6 s
+               → graph reasoning
 
 Complex:       "Compare supervised and unsupervised learning"
-               → multi-hop decomposition, 4–6 s
+               → multi-hop decomposition
 ```
 
 ### 3. Read the Answer
 
-Every answer includes inline citations (`[1]`, `[2]`, …) tracing each claim to the source chunk.
-When information is not available, the system says so explicitly — it does not guess.
+Every answer includes inline citations (`[1]`, `[2]`, …) tracing each claim to its source chunk. When information is not available, the system says so explicitly.
 
 ---
 
-## 🛠️ Technology Stack
+## Technology Stack
 
 | Layer | Technology | Role |
 |-------|-----------|------|
@@ -276,144 +245,133 @@ When information is not available, the system says so explicitly — it does not
 | Vector DB | ChromaDB | Persistent vector storage |
 | Graph | NetworkX | Knowledge graph + path finding |
 | NLP | spaCy `en_core_web_md` | NER, dependency parsing |
-| Evaluation | RAGAS | Production-grade answer scoring |
-| Monitoring | LangSmith | Agent-level execution tracing |
+| Evaluation | RAGAS + custom SimpleEvaluator | Answer quality scoring |
 | Frontend | Streamlit | Web interface |
-| Cache | Redis *(optional)* | Query-result caching |
 
 ---
 
-## 📁 Project Structure
+## Project Structure
 
 ```
-agentic-rag-system/
-├── app.py                           # Streamlit entry point
+newnewnew-rag/
+├── app.py                              # Streamlit entry point
 ├── src/
-│   ├── agents/                      # 11 agents
-│   │   ├── planner.py               # L1 — strategy selection
-│   │   ├── retrieval_coordinator.py # L2 — swarm orchestration
-│   │   ├── validator.py             # L2 — retrieval quality gate
-│   │   ├── synthesis.py             # L2 — dedupe + ranking
-│   │   ├── writer.py                # L2 — answer generation
-│   │   ├── critic.py                # L2 — answer review
-│   │   ├── query_decomposer.py      # L2 — multi-hop decomposition
-│   │   └── retrieval/               # L3 — swarm
-│   │       ├── vector_agent.py
-│   │       ├── keyword_agent.py
-│   │       └── graph_agent.py
-│   ├── graph/                       # GraphRAG pipeline
+│   ├── agents/                         # Agent implementations
+│   │   ├── planner.py                  # L1 — strategy selection
+│   │   ├── query_decomposer.py         # L2 — multi-hop decomposition
+│   │   ├── retrieval_coordinator.py    # L2 — swarm orchestration
+│   │   ├── validator.py                # L2 — retrieval quality gate
+│   │   ├── synthesis.py                # L2 — dedupe + ranking
+│   │   ├── writer.py                   # L2 — answer generation
+│   │   ├── critic.py                   # L2 — answer review
+│   │   ├── reliability_gate.py         # Final grounding check
+│   │   ├── self_reflection.py          # Self-reflection agent
+│   │   ├── graph_search_agent.py       # Graph-based search agent
+│   │   ├── graph_traversal_agent.py    # Graph traversal logic
+│   │   └── retrieval/                  # Legacy retrieval agents (test only)
+│   ├── retrieval/                      # Production retrieval
+│   │   ├── vector_search.py            # BGE semantic search
+│   │   ├── keyword_search.py           # BM25 keyword search
+│   │   ├── graph_search.py             # Knowledge graph search
+│   │   ├── graph_retrieval.py          # Graph-enhanced retrieval
+│   │   └── bm25_index.py               # BM25 index builder
+│   ├── graph/                          # GraphRAG pipeline
 │   │   ├── entity_extractor.py
 │   │   ├── relationship_extractor.py
-│   │   ├── graph_builder.py
-│   │   └── graph_visualizer.py
-│   ├── ingestion/                   # Document processing
+│   │   └── graph_builder.py
+│   ├── ingestion/                      # Document processing
 │   │   ├── document_loader.py
 │   │   ├── hierarchical_chunker.py
 │   │   └── embedder.py
-│   ├── storage/                     # Persistence
+│   ├── storage/                        # Persistence
 │   │   ├── chroma_store.py
 │   │   └── database.py
-│   ├── evaluation/                  # Quality measurement
-│   │   ├── ragas_evaluator.py       # RAGAS (DeepSeek + BGE override)
-│   │   └── simple_evaluator.py      # Lightweight rule-based metrics
-│   ├── orchestration/               # LangGraph workflows
-│   ├── models/                      # Pydantic data models
-│   └── config.py                    # Centralised settings
+│   ├── evaluation/                     # Quality measurement
+│   │   ├── ragas_evaluator.py          # RAGAS (DeepSeek + BGE)
+│   │   └── simple_evaluator.py         # Lightweight rule-based metrics
+│   ├── orchestration/                  # LangGraph workflows
+│   │   ├── complete_workflow.py        # Full 7-node pipeline
+│   │   ├── langgraph_workflow.py
+│   │   └── multihop_handler.py
+│   ├── models/                         # Pydantic data models
+│   └── config.py                       # Centralised settings
 ├── tests/
-│   ├── unit/                        # 27 tests — isolated components
-│   ├── integration/                 # 35 tests — multi-component flows
-│   ├── evaluation/                  # 17 tests — RAGAS pipeline
-│   │   ├── test_ragas_evaluation.py # Mocked (zero API cost)
-│   │   └── test_ragas_real.py       # Live evaluation (hits API)
-│   └── e2e/                         # End-to-end workflow tests
-├── docs/
-│   ├── RAGAS_EVALUATION_REPORT.md   # Full evaluation analysis
-│   ├── ABLATION_REPORT.md           # Component-impact study
-│   ├── ARCHITECTURE_OVERVIEW.md     # System design
-│   ├── PROJECT_OVERVIEW_CONCISE.md  # High-level summary
-│   └── USER_GUIDE.md                # End-user guide
-├── data/                            # Runtime data (.gitignore'd)
+│   ├── unit/                           # Isolated component tests
+│   ├── integration/                    # Multi-component flow tests
+│   ├── evaluation/                     # RAGAS pipeline tests
+│   └── e2e/                            # End-to-end workflow tests
+├── docs/                               # Architecture & evaluation reports
+├── data/                               # Runtime data (.gitignore'd)
 │   ├── chroma_db/
-│   └── graphs/
+│   ├── evaluation/
+│   └── uploads/
+├── evaluation/                         # Benchmark scripts
+│   └── run_thesis_benchmark.py
 ├── .env.example
 └── requirements.txt
 ```
 
 ---
 
-## 🧪 Testing
+## Testing
 
 ```bash
-# Full suite — 82 tests
-pytest tests/ -v
+# Full unit test suite — 230+ tests
+pytest tests/unit/ -v
 
 # By layer
-pytest tests/unit/                                   # 27 unit tests
-pytest tests/integration/                            # 35 integration tests
-pytest tests/e2e/                                    # end-to-end tests
+pytest tests/unit/                                     # Unit tests
+pytest tests/integration/                              # Integration tests
+pytest tests/e2e/                                      # End-to-end tests
+
+# Reliability gate tests
+pytest tests/unit/test_reliability_gate.py -v          # 5 tests
 
 # RAGAS pipeline — mocked, no API cost
-pytest tests/evaluation/test_ragas_evaluation.py -v  # 17 tests
+pytest tests/evaluation/test_ragas_evaluation.py -v
 
-# RAGAS — live scores (calls DeepSeek + BGE)
-python tests/evaluation/test_ragas_real.py
-
-# Ablation study
-python evaluation/ablation_studies.py
-
-# Baseline vs Agentic (thesis comparison — needs indexed docs + API key)
-python evaluation/compare_baseline.py "What is machine learning?"
-
-# Thesis experiment table (Baseline vs Agentic + RAGAS) — see docs/THESIS_EXPERIMENT_GUIDE.md
+# Thesis benchmark (needs indexed docs + API key)
 python evaluation/run_thesis_benchmark.py --limit 2
 ```
 
-Coverage: **92%** across core modules. All 82 tests green.
+---
+
+## Evaluation
+
+The system uses a custom `SimpleEvaluator` for lightweight runtime metrics:
+
+| Metric | What it measures |
+|--------|-----------------|
+| Citation Rate | Whether answers include inline citations to source chunks |
+| Context Usage | Whether retrieved chunks are actually used in the answer |
+| Answer Quality | Substantial, complete, and grounded responses |
+| Self-Reflection | Improvement through critic-triggered regeneration |
+
+RAGAS (Faithfulness, Answer Relevancy, Context Precision/Recall) is available offline for detailed analysis via `src/evaluation/ragas_evaluator.py`.
 
 ---
 
-## 📚 Documentation
+## Documentation
 
 | Doc | What it covers |
 |-----|----------------|
-| [RAGAS Evaluation Report](docs/RAGAS_EVALUATION_REPORT.md) | Methodology, all scores, production-gate logic, issues & fixes |
-| [Architecture Overview](docs/ARCHITECTURE_OVERVIEW.md) | Agent hierarchy, data flow, component interaction |
+| [RAGAS Evaluation Report](docs/RAGAS_EVALUATION_REPORT.md) | Methodology, scores, production-gate logic |
+| [Thesis Architecture](docs/THESIS_ARCHITECTURE.md) | Agent hierarchy, data flow, component interaction |
 | [Ablation Report](docs/ABLATION_REPORT.md) | Quantified impact of each subsystem |
-| [Project Overview](docs/PROJECT_OVERVIEW_CONCISE.md) | High-level summary |
 | [User Guide](docs/USER_GUIDE.md) | End-user how-to |
 
 ---
 
-## 📈 Development Timeline
-
-| Phase | Weeks | Delivered | Accuracy |
-|-------|:-----:|-----------|:--------:|
-| Foundation | 1–2 | Ingestion, chunking, ChromaDB, basic RAG | 60% |
-| Multi-Agent | 3–4 | Planner, Coordinator, Validator, swarm | 80% |
-| Self-Reflection | 5–6 | Writer, Critic, regeneration loop | 85% |
-| GraphRAG | 9–10 | Entity extraction, graph, relationship queries | 92% |
-| Evaluation | 11+ | RAGAS integration, ablation, production gate | — |
-
----
-
-## 📄 License
+## License
 
 MIT License — see [LICENSE](LICENSE)
 
 ---
 
-## 🙏 Acknowledgments
+## Acknowledgments
 
 - **DeepSeek** — LLM API
 - **BAAI BGE** — Embedding model
 - **Microsoft Research** — GraphRAG methodology
 - **LangChain / LangGraph** — Orchestration framework
 - **RAGAS** — Evaluation framework
-
----
-
-## 📧 Contact
-
-- **GitHub:** [Jihaad2021](https://github.com/Jihaad2021)
-- **LinkedIn:** [jihaad-arief-pangestu](https://linkedin.com/in/jihaad-arief-pangestu)
-- **Email:** jihaadariefpangestu@gmail.com
