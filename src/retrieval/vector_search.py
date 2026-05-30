@@ -127,6 +127,11 @@ class VectorSearchAgent(BaseAgent):
             List of Chunk objects
         """
         try:
+            chunks = []
+
+            if self._needs_document_overview(query):
+                chunks.extend(self._get_overview_chunks(limit=2))
+
             # Generate embedding
             query_embedding = self.embedder.generate_query_embedding(query)
             
@@ -138,7 +143,6 @@ class VectorSearchAgent(BaseAgent):
             )
             
             # Convert to chunks
-            chunks = []
             for result in results:
                 chunk = Chunk(
                     text=result['text'],
@@ -159,3 +163,36 @@ class VectorSearchAgent(BaseAgent):
         except Exception as e:
             self.log(f"Async vector search failed: {str(e)}", level="error")
             return []
+
+    def _needs_document_overview(self, query: str) -> bool:
+        lowered = query.lower()
+        overview_terms = [
+            "main topic",
+            "uploaded document",
+            "this document",
+            "summarize",
+            "summary",
+            "key points",
+            "main message",
+        ]
+        return any(term in lowered for term in overview_terms)
+
+    def _get_overview_chunks(self, limit: int = 2) -> List[Chunk]:
+        if not hasattr(self.vector_store, "get_parent_chunks"):
+            return []
+
+        chunks = []
+        for result in self.vector_store.get_parent_chunks(limit=limit):
+            chunks.append(Chunk(
+                text=result["text"],
+                doc_id="unknown",
+                chunk_id=result["chunk_id"],
+                score=result.get("score", 1.0),
+                metadata={
+                    "filename": result.get("metadata", {}).get("filename", "unknown"),
+                    "chunk_type": result.get("chunk_type", "parent"),
+                    "source": "document_overview",
+                    **result.get("metadata", {}),
+                },
+            ))
+        return chunks

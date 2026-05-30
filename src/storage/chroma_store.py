@@ -219,6 +219,29 @@ class ChromaVectorStore:
             print(f"   {i+1}. {formatted_results[-1]['chunk_type']}: {formatted_results[-1]['chunk_id'][:30]} (score: {similarity:.4f})")
         
         return formatted_results
+
+    def get_parent_chunks(self, limit: int = 3) -> List[Dict[str, Any]]:
+        """Return the first parent chunks as document-level overview context."""
+        results = self.parent_collection.get(
+            include=["documents", "metadatas"],
+            limit=limit,
+        )
+
+        chunks = []
+        for chunk_id, text, metadata in zip(
+            results.get("ids", []),
+            results.get("documents", []),
+            results.get("metadatas", []),
+        ):
+            chunks.append({
+                "chunk_id": chunk_id,
+                "text": text,
+                "score": 1.0,
+                "chunk_type": "parent",
+                "metadata": metadata or {},
+            })
+
+        return chunks
     
     def delete_document_chunks(self, document_id: str) -> None:
         """
@@ -249,3 +272,7 @@ class ChromaVectorStore:
             'total_children': self.child_collection.count(),
             'total_vectors': self.parent_collection.count() + self.child_collection.count()
         }
+
+    def count(self) -> int:
+        """Compatibility helper for retrievers that need a total chunk count."""
+        return self.child_collection.count()

@@ -78,6 +78,32 @@ def test_reliability_gate_fallback_summary_can_recover_missing_citation():
     assert result["passed"] is True
 
 
+def test_reliability_gate_treats_low_scores_as_warnings_for_cited_answers():
+    gate = ReliabilityGate()
+    state = AgentState(
+        query="What is Python?",
+        chunks=[
+            Chunk(
+                text="Python is a programming language.",
+                doc_id="doc",
+                chunk_id="chunk-1",
+                score=0.9,
+                metadata={},
+            )
+        ],
+        answer="Python is a programming language [1].",
+        validation_score=0.2,
+        critic_score=0.4,
+    )
+
+    result = gate.evaluate(state)
+
+    assert result["passed"] is True
+    assert result["blocking_reasons"] == []
+    assert "low_validation_score" in result["reasons"]
+    assert "low_critic_score" in result["reasons"]
+
+
 def test_reliability_gate_allows_honest_non_answer():
     gate = ReliabilityGate()
     state = AgentState(

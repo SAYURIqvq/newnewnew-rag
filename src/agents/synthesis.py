@@ -232,10 +232,13 @@ class SynthesisAgent(BaseAgent):
             base_score = chunk.score or 0.0
             
             # Weight by source
-            if source == "vector":
+            if source == "document_overview":
+                hybrid_score = 1.0
+            elif source == "vector":
                 hybrid_score = base_score * self.vector_weight
             elif source == "keyword":
-                hybrid_score = base_score * self.keyword_weight
+                normalized_keyword = min(base_score / 15.0, 0.65)
+                hybrid_score = normalized_keyword * self.keyword_weight
             elif source == "graph":
                 # Graph uses average of vector/keyword weights
                 hybrid_score = base_score * (

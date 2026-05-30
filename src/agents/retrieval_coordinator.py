@@ -496,15 +496,28 @@ class RetrievalCoordinator(BaseAgent):
         if not chunks:
             return []
         
-        # Sort by score (descending)
+        # Sort by calibrated score. BM25 scores are unbounded while vector
+        # scores are normalized, so raw sorting lets keyword retrieval dominate.
         sorted_chunks = sorted(
             chunks,
-            key=lambda c: c.score if c.score is not None else 0.0,
+            key=self._calibrated_score,
             reverse=True
         )
         
         # Return top-k
         return sorted_chunks[:k]
+
+    def _calibrated_score(self, chunk: Chunk) -> float:
+        score = chunk.score if chunk.score is not None else 0.0
+        source = chunk.metadata.get("source", "unknown")
+
+        if source == "document_overview":
+            return 1.0
+        if source == "keyword":
+            return min(score / 15.0, 0.65)
+        if source == "graph":
+            return min(score, 0.8)
+        return score
     
     def retrieve_with_details(self, query: str) -> Dict[str, Any]:
         """

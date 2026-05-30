@@ -53,8 +53,11 @@ class KeywordSearchAgent(BaseAgent):
         self.vector_store = vector_store
         self.bm25_index = BM25Index(index_path=index_path)
         
-        # Build index if not exists
-        if not self.bm25_index.bm25:
+        expected_chunks = self._current_chunk_count()
+        loaded_chunks = len(self.bm25_index.chunk_ids)
+
+        # Build index if missing or stale against the current Chroma collection.
+        if not self.bm25_index.bm25 or loaded_chunks != expected_chunks:
             self.log("Building BM25 index...", level="info")
             try:
                 self.bm25_index.build_from_vector_store(vector_store)
@@ -64,6 +67,12 @@ class KeywordSearchAgent(BaseAgent):
                 self.log(f"Failed to build BM25 index: {e}", level="warning")
         
         self.log("Initialized with BM25 index", level="debug")
+
+    def _current_chunk_count(self) -> int:
+        try:
+            return self.vector_store.child_collection.count()
+        except Exception:
+            return 0
     
     def execute(self, state: AgentState) -> AgentState:
         """
@@ -178,7 +187,8 @@ class KeywordSearchAgent(BaseAgent):
         self.log("Rebuilding BM25 index...", level="info")
         
         try:
-            self.bm25_index.rebuild()
+            self.bm25_index.build_from_vector_store(self.vector_store)
+            self.bm25_index.save()
             self.log("✅ BM25 index rebuilt", level="info")
         except Exception as e:
             self.log(f"Failed to rebuild index: {e}", level="error")

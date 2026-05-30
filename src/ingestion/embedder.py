@@ -260,8 +260,12 @@ class EmbeddingGenerator:
                 )
                 return result.embeddings[0]
 
+            query_text = query
+            if self.model.lower().startswith("baai/bge"):
+                query_text = f"Represent this sentence for searching relevant passages: {query}"
+
             emb = self.client.encode(
-                [query],
+                [query_text],
                 normalize_embeddings=True,
                 show_progress_bar=False,
             )[0]

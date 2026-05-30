@@ -86,20 +86,20 @@ class BM25Index:
             if vector_store is None:
                 vector_store = ChromaVectorStore()  # ← CHANGE
             
-            # Get all chunks from ChromaDB
-            total_chunks = vector_store.count()
+            # Get all searchable child chunks from ChromaDB.
+            total_chunks = vector_store.child_collection.count()
             
             if total_chunks == 0:
                 raise BM25IndexError(
                     message="No chunks in vector store to index",
-                    details={"collection": vector_store.collection_name}
+                    details={"collection": "child_chunks"}
                 )
             
             self.logger.info(f"Indexing {total_chunks} chunks...")
             
             # Fetch all chunks (ChromaDB doesn't have scan, so query with large limit)
             # This is a workaround - in production, use batch fetching
-            results = vector_store.collection.get(
+            results = vector_store.child_collection.get(
                 include=["documents", "metadatas"],
                 limit=total_chunks
             )

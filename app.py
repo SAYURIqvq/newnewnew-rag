@@ -1274,8 +1274,8 @@ def display_evaluation_interface():
         import pandas as pd
         
         df_data = []
-        for score in results['detailed_scores']:
-            workflow_row = all_workflow_rows[i]
+        for row_idx, score in enumerate(results['detailed_scores']):
+            workflow_row = all_workflow_rows[row_idx]
             df_data.append({
                 'Question': score['query'][:50] + '...',
                 'Strategy': workflow_row['strategy'],

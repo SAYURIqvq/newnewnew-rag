@@ -47,21 +47,38 @@ class SimpleEvaluator:
         scores['has_citations'] = 1.0 if len(citations) > 0 else 0.0
         scores['citation_count'] = len(set(citations))
         
-        # 2. Answer Length (substantial?)
+        # 2. Answer Length (substantial enough for concise RAG answers?)
         word_count = len(answer.split())
         scores['word_count'] = word_count
-        scores['is_substantial'] = 1.0 if word_count >= 50 else 0.0
+        if word_count >= 45:
+            scores['is_substantial'] = 1.0
+        elif word_count >= 25:
+            scores['is_substantial'] = 0.7
+        elif word_count >= 15:
+            scores['is_substantial'] = 0.4
+        else:
+            scores['is_substantial'] = 0.0
         
         # 3. Context Usage (chunks mentioned in answer?)
+        cited_chunk_numbers = {
+            int(citation)
+            for citation in citations
+            if citation.isdigit() and 1 <= int(citation) <= len(chunks)
+        }
+        cited_chunks_used = len(cited_chunk_numbers)
+
         chunks_used = 0
+        answer_terms = self._content_terms(answer)
         for chunk in chunks[:5]:  # Check top 5
-            # Simple check: is any chunk text in answer?
-            chunk_words = chunk.text.split()[:10]  # First 10 words
-            if any(word in answer for word in chunk_words if len(word) > 4):
+            chunk_terms = self._content_terms(chunk.text)
+            overlap = answer_terms & chunk_terms
+            if len(overlap) >= 2:
                 chunks_used += 1
         
+        chunks_used = max(chunks_used, cited_chunks_used)
+        denominator = min(len(chunks), 5)
         scores['chunks_used'] = chunks_used
-        scores['context_usage_rate'] = chunks_used / min(len(chunks), 5) if chunks else 0.0
+        scores['context_usage_rate'] = chunks_used / denominator if denominator else 0.0
         
         # 4. Self-Reflection Metrics
         # Accept either the full workflow metadata or the self_reflection sub-dict.
@@ -79,6 +96,18 @@ class SimpleEvaluator:
         )
         
         return scores
+
+    def _content_terms(self, text: str) -> set[str]:
+        stopwords = {
+            "about", "above", "after", "again", "against", "also", "because",
+            "before", "being", "between", "could", "document", "documents",
+            "does", "from", "have", "into", "more", "other", "provided",
+            "should", "some", "such", "than", "that", "their", "there",
+            "these", "this", "through", "uploaded", "using", "were", "what",
+            "when", "where", "which", "while", "with", "would",
+        }
+        terms = re.findall(r"[A-Za-z][A-Za-z0-9_-]{3,}", text.lower())
+        return {term for term in terms if term not in stopwords}
     
     def evaluate_batch(
         self,

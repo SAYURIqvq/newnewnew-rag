@@ -59,11 +59,21 @@ class ReliabilityGate:
         if state.chunks and not citation_numbers and not honest_non_answer:
             reasons.append("missing_citations")
 
-        passed = not reasons or honest_non_answer
+        blocking_reasons = [
+            reason for reason in reasons
+            if reason in {
+                "empty_answer",
+                "no_retrieved_context",
+                "invalid_citations",
+                "missing_citations",
+            }
+        ]
+        passed = not blocking_reasons or honest_non_answer
 
         return {
             "passed": passed,
             "reasons": reasons,
+            "blocking_reasons": blocking_reasons,
             "citation_count": len(set(citation_numbers)),
             "invalid_citations": invalid_citations,
             "honest_non_answer": honest_non_answer,
