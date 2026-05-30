@@ -118,59 +118,61 @@ Relationship   (complexity > 0.7)   → Graph path finding → entity retrieval
 ## Architecture
 
 ```
-                          ┌──────────────────────┐
-                          │   USER (Streamlit)    │
-                          └───────────┬──────────┘
-                                      ▼
-                          ┌──────────────────────┐
-                          │      PLANNER (L1)     │
-                          │  complexity → strategy │
-                          └───────────┬──────────┘
-                                      ▼
-                          ┌──────────────────────┐
-                          │  QUERY DECOMPOSER (L2)│
-                          └───────────┬──────────┘
-                                      ▼
-                    ┌─────────────────┼─────────────────┐
-                    ▼                 ▼                   ▼
-             ┌──────────┐     ┌──────────┐       ┌──────────┐
-             │ Vector   │     │ Keyword  │       │ Graph    │   L3 Swarm
-             │ Agent    │     │ Agent    │       │ Agent    │   (parallel)
-             └────┬─────┘     └────┬─────┘       └────┬─────┘
-                  └───────────────┼───────────────────┘
-                                  ▼
-                    ┌──────────────────────┐
-                    │     VALIDATOR (L2)    │
-                    │  quality gate → retry? │◄──────────┐
-                    └───────────┬──────────┘            │
-                                ▼ (proceed)              │ (retry)
-                    ┌──────────────────────┐            │
-                    │    SYNTHESIS (L2)     │            │
-                    │  dedupe + hybrid rank │            │
-                    └───────────┬──────────┘            │
-                                ▼                        │
-                    ┌──────────────────────┐            │
-                    │     WRITER (L2)       │            │
-                    │  generate + citations  │◄─────┐    │
-                    └───────────┬──────────┘      │    │
-                                ▼                   │    │
-                    ┌──────────────────────┐      │    │
-                    │     CRITIC (L2)       │      │    │
-                    │  review → regenerate? │──────┘    │
-                    └───────────┬──────────┘            │
-                                ▼ (approved)             │
-                    ┌──────────────────────┐            │
-                    │  RELIABILITY GATE     │            │
-                    │  final grounding check │            │
-                    └───────────┬──────────┘            │
-                                ▼                        │
-                    ┌──────────────────────┐            │
-                    │  Answer + Citations   │            │
-                    └──────────────────────┘            │
-                                                        │
-              ┌─────────────────────────────────────────┘
-              │  Retry loop: Validator sends back to Retrieval
-              │  Self-reflection loop: Critic sends back to Writer
+                          ┌──────────────────┐
+                          │  USER (Streamlit) │
+                          └────────┬─────────┘
+                                   ▼
+                          ┌──────────────────┐
+                          │   PLANNER (L1)    │
+                          │ complexity→strategy│
+                          └────────┬─────────┘
+                                   ▼
+                          ┌──────────────────┐
+                          │ QUERY DECOMPOSER  │
+                          └────────┬─────────┘
+                                   ▼
+                ┌──────────────────┼──────────────────┐
+                ▼                  ▼                  ▼
+         ┌──────────┐      ┌──────────┐      ┌──────────┐
+         │  Vector  │      │ Keyword  │      │  Graph   │  L3 Swarm
+         │  Agent   │      │  Agent   │      │  Agent   │  (parallel)
+         └────┬─────┘      └────┬─────┘      └────┬─────┘
+              └────────────────┼─────────────────┘
+                               ▼
+                     ┌──────────────────┐
+                     │  VALIDATOR (L2)   │◄── retry (max 2)
+                     │  quality gate     │
+                     └────────┬─────────┘
+                              ▼
+                     ┌──────────────────┐
+                     │  SYNTHESIS (L2)   │
+                     │ dedupe+hybrid rank│
+                     └────────┬─────────┘
+                              ▼
+                     ┌──────────────────┐
+                     │   WRITER (L2)     │◄──────────┐
+                     │ generate+citations│           │
+                     └────────┬─────────┘           │
+                              ▼                      │
+                     ┌──────────────────┐           │
+                     │   CRITIC (L2)     │           │
+                     │ review→regenerate?│──┐        │ regenerate
+                     └────────┬─────────┘  │        │ (max 3)
+                              ▼             │        │
+                     ┌──────────────────┐  │        │
+                     │ RELIABILITY GATE  │  │        │
+                     │ grounding check   │  │        │
+                     └────────┬─────────┘  │        │
+                              ▼             │        │
+                     ┌──────────────────┐  │        │
+                     │ Answer+Citations  │  │        │
+                     └──────────────────┘  │        │
+                                           │        │
+              ┌────────────────────────────┘        │
+              │  Two feedback loops:                │
+              │  1. Validator → back to Retrieval ◄─┘
+              │  2. Writer ↔ Critic self-reflection
+              └─────────────────────────────────────
 ```
 
 ---
