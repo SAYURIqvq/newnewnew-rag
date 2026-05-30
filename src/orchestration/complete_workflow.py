@@ -722,8 +722,24 @@ class CompleteAgenticRAGWorkflow:
                 
                 regeneration_attempts += 1
             
+            # Apply reliability gate (same as run())
+            state = self.reliability_gate.apply(state)
+            if (
+                not state.metadata.get("reliability_gate", {}).get("passed")
+                and state.chunks
+            ):
+                self.logger.warning(
+                    "Reliability gate failed; using deterministic cited evidence summary"
+                )
+                state.answer = self.writer.generate_context_summary(
+                    state.query,
+                    state.chunks,
+                )
+                state = self.reliability_gate.apply(state)
+                state.metadata["reliability_gate"]["fallback_used"] = True
+
             total_duration = time.time() - start_time
-            
+
             return {
                 "final_state": state,
                 "execution_path": execution_path,
