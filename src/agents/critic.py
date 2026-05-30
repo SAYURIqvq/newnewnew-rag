@@ -234,7 +234,8 @@ RECOMMENDATION:
         # Get critique from LLM
         try:
             response = self.llm.invoke(prompt)
-            critique_text = response.content
+            from src.llm.content_utils import extract_llm_text
+            critique_text = extract_llm_text(response.content)
             
             # Parse response
             parsed = self._parse_critique(critique_text)

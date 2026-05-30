@@ -358,6 +358,12 @@ python tests/evaluation/test_ragas_real.py
 
 # Ablation study
 python evaluation/ablation_studies.py
+
+# Baseline vs Agentic (thesis comparison — needs indexed docs + API key)
+python evaluation/compare_baseline.py "What is machine learning?"
+
+# Thesis experiment table (Baseline vs Agentic + RAGAS) — see docs/THESIS_EXPERIMENT_GUIDE.md
+python evaluation/run_thesis_benchmark.py --limit 2
 ```
 
 Coverage: **92%** across core modules. All 82 tests green.

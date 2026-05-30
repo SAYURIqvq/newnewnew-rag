@@ -5,7 +5,7 @@ Configuration management for Agentic RAG System.
 import os
 from typing import Optional, List
 from pydantic_settings import BaseSettings
-from pydantic import Field, field_validator, ConfigDict
+from pydantic import Field, field_validator, ConfigDict, AliasChoices
 
 
 class Settings(BaseSettings):
@@ -19,9 +19,14 @@ class Settings(BaseSettings):
     )
     
     # ===== API Keys =====
-    dashscope_api_key: Optional[str] = Field(
+    anthropic_auth_token: Optional[str] = Field(
         default=None,
-        description="DashScope API key for Qwen (required for real LLM calls)",
+        description="DeepSeek / Anthropic-compatible API token",
+        validation_alias=AliasChoices(
+            "ANTHROPIC_AUTH_TOKEN",
+            "ANTHROPIC_API_KEY",
+            "DASHSCOPE_API_KEY",
+        ),
     )
     voyage_api_key: Optional[str] = Field(
         default=None,
@@ -37,12 +42,17 @@ class Settings(BaseSettings):
     vector_search_top_k: int = Field(default=10, description="Number of chunks for vector search", gt=0)
     
     # ===== Model Configuration =====
-    llm_model: str = Field(default="qwen-plus", description="Qwen model to use")
+    llm_model: str = Field(
+        default="deepseek-chat",
+        description="Chat model name (DeepSeek via Anthropic-compatible API)",
+        validation_alias=AliasChoices("ANTHROPIC_MODEL", "LLM_MODEL"),
+    )
     llm_temperature: float = Field(default=0.0, description="LLM temperature (0.0-1.0)", ge=0.0, le=1.0)
     llm_max_tokens: int = Field(default=4096, description="Maximum tokens for LLM response", gt=0)
-    qwen_base_url: str = Field(
-        default="https://dashscope.aliyuncs.com/compatible-mode/v1",
-        description="DashScope OpenAI-compatible base URL",
+    anthropic_base_url: str = Field(
+        default="https://api.deepseek.com/anthropic",
+        description="Anthropic-compatible API base URL (DeepSeek)",
+        validation_alias=AliasChoices("ANTHROPIC_BASE_URL", "QWEN_BASE_URL"),
         min_length=10,
     )
     embedding_model: str = Field(default="BAAI/bge-large-en-v1.5", description="Embedding model to use")
@@ -149,8 +159,8 @@ class Settings(BaseSettings):
             "model": self.llm_model,
             "temperature": self.llm_temperature,
             "max_tokens": self.llm_max_tokens,
-            "api_key": self.dashscope_api_key,
-            "base_url": self.qwen_base_url,
+            "api_key": self.anthropic_auth_token,
+            "base_url": self.anthropic_base_url,
         }
     
     def is_production(self) -> bool:

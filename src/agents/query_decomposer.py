@@ -113,7 +113,8 @@ Sub-questions:"""
         
         try:
             response = self.llm.invoke(prompt)
-            sub_queries = self._parse_sub_queries(response.content)
+            from src.llm.content_utils import extract_llm_text
+            sub_queries = self._parse_sub_queries(extract_llm_text(response.content))
             return sub_queries
         except Exception as e:
             self.log(f"Multihop decomposition failed: {e}", level="error")
@@ -147,7 +148,8 @@ Sub-questions:"""
         
         try:
             response = self.llm.invoke(prompt)
-            sub_queries = self._parse_sub_queries(response.content)
+            from src.llm.content_utils import extract_llm_text
+            sub_queries = self._parse_sub_queries(extract_llm_text(response.content))
             return sub_queries
         except Exception as e:
             self.log(f"Graph decomposition failed: {e}", level="error")

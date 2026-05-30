@@ -1,0 +1,53 @@
+{
+  "description": "Thesis evaluation set. Replace ground_truth with facts from YOUR uploaded documents.",
+  "test_cases": [
+    {
+      "question": "What is the main topic of the document?",
+      "ground_truth": "Replace with a one-sentence summary from your document.",
+      "difficulty": "easy",
+      "category": "definition"
+    },
+    {
+      "question": "What are the key points or findings presented?",
+      "ground_truth": "Replace with bullet facts from your document.",
+      "difficulty": "medium",
+      "category": "explanation"
+    },
+    {
+      "question": "How does the document define the core concept?",
+      "ground_truth": "Replace with the definition sentence from your document.",
+      "difficulty": "easy",
+      "category": "definition"
+    },
+    {
+      "question": "What methods or approaches are described?",
+      "ground_truth": "Replace with method names from your document.",
+      "difficulty": "medium",
+      "category": "process"
+    },
+    {
+      "question": "What limitations or challenges are mentioned?",
+      "ground_truth": "Replace with limitation text from your document.",
+      "difficulty": "hard",
+      "category": "explanation"
+    },
+    {
+      "question": "Compare the two main ideas discussed in the document.",
+      "ground_truth": "Replace with comparison content from your document.",
+      "difficulty": "hard",
+      "category": "comparison"
+    },
+    {
+      "question": "What is artificial intelligence?",
+      "ground_truth": "Artificial intelligence is the simulation of human intelligence processes by machines, especially computer systems.",
+      "difficulty": "easy",
+      "category": "definition"
+    },
+    {
+      "question": "What is the purpose of RAG in AI systems?",
+      "ground_truth": "Retrieval-Augmented Generation combines retrieval with generation to ground answers in documents.",
+      "difficulty": "hard",
+      "category": "concept"
+    }
+  ]
+}

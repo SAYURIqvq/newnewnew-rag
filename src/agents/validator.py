@@ -250,7 +250,8 @@ Respond with ONLY a number between 0.0 and 1.0."""
 
         try:
             response = self.llm.invoke(prompt)
-            score_text = response.content.strip()
+            from src.llm.content_utils import extract_llm_text
+            score_text = extract_llm_text(response.content).strip()
             
             # Extract number
             import re

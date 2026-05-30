@@ -40,7 +40,7 @@ def evaluator():
     Mock Qwen LLM factory dan LangchainLLMWrapper
     SEBELUM import RAGASEvaluator.
     """
-    with patch("src.evaluation.ragas_evaluator.create_qwen_chat_model") as mock_factory, \
+    with patch("src.evaluation.ragas_evaluator.create_chat_model") as mock_factory, \
          patch("src.evaluation.ragas_evaluator.LangchainLLMWrapper") as mock_wrapper:
 
         # Mock Qwen factory return value

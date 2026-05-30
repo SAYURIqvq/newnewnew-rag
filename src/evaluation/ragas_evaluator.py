@@ -23,7 +23,7 @@ from ragas.llms import LangchainLLMWrapper
 from ragas.embeddings import LangchainEmbeddingsWrapper
 from langchain_core.embeddings import Embeddings
 from src.config import get_settings
-from src.llm.qwen import create_qwen_chat_model
+from src.llm.chat_model import create_chat_model
 
 class BGELargeEmbeddings(Embeddings):
     """
@@ -60,13 +60,13 @@ class RAGASEvaluator:
     Uses Claude (LLM) + Voyage AI (Embeddings).
     """
 
-    def __init__(self, model: str = "qwen-plus"):
+    def __init__(self, model: str = None):
         settings = get_settings()
-        if not settings.dashscope_api_key:
-            raise ValueError("DASHSCOPE_API_KEY not found in .env")
+        if not settings.anthropic_auth_token:
+            raise ValueError("ANTHROPIC_AUTH_TOKEN not found in .env")
 
-        # Override LLM → Qwen (DashScope compatible-mode)
-        llm = create_qwen_chat_model(settings, model=model, temperature=0.0)
+        model = model or settings.llm_model
+        llm = create_chat_model(settings, model=model, temperature=0.0)
         self.llm = LangchainLLMWrapper(llm)
 
         # Override Embeddings → BGE-large (Sentence-Transformers)
@@ -80,7 +80,7 @@ class RAGASEvaluator:
         ]
 
         print("📊 RAGAS Evaluator initialized")
-        print(f"   LLM: Qwen ({model})")
+        print(f"   LLM: DeepSeek ({model})")
         print(f"   Embeddings: BGE-large ({self.embeddings})")
         print(f"   Metrics: {len(self.metrics)}")
 

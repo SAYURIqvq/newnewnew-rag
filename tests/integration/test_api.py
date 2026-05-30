@@ -1,36 +1,39 @@
-"""Test API connections for Qwen (DashScope) and local BGE-large embeddings."""
+"""Test API connections for DeepSeek LLM and local BGE-large embeddings."""
 
 import os
 from dotenv import load_dotenv
-from langchain_openai import ChatOpenAI
+
 os.environ.setdefault("TRANSFORMERS_NO_TF", "1")
 os.environ.setdefault("USE_TF", "0")
-from sentence_transformers import SentenceTransformer
 
-# Load environment variables
 load_dotenv()
 
 
-def test_qwen():
-    """Test Qwen via DashScope compatible-mode."""
-    print("Testing Qwen (DashScope compatible-mode) ...")
+def test_deepseek_llm():
+    """Test DeepSeek via Anthropic-compatible API."""
+    print("Testing DeepSeek (Anthropic-compatible API) ...")
     try:
-        llm = ChatOpenAI(
-            api_key=os.getenv("DASHSCOPE_API_KEY"),
-            base_url=os.getenv("QWEN_BASE_URL", "https://dashscope.aliyuncs.com/compatible-mode/v1"),
-            model=os.getenv("LLM_MODEL", "qwen-plus"),
-            temperature=0,
-        )
+        from src.config import get_settings
+        from src.llm.chat_model import create_chat_model
+
+        settings = get_settings()
+        if not settings.anthropic_auth_token:
+            print("❌ ANTHROPIC_AUTH_TOKEN not set in .env")
+            return False
+        llm = create_chat_model(settings)
         response = llm.invoke("Say 'Hello, RAG!'")
-        print(f"✅ Qwen works! Response: {response.content}")
+        content = response.content if hasattr(response, "content") else str(response)
+        print(f"✅ DeepSeek works! Response: {content}")
         return True
     except Exception as e:
-        print(f"❌ Qwen failed: {e}")
+        print(f"❌ DeepSeek failed: {e}")
         return False
 
 
 def test_bge():
     """Test local BGE-large embeddings."""
+    from sentence_transformers import SentenceTransformer
+
     print("\nTesting BGE-large (Sentence-Transformers) ...")
     try:
         model = os.getenv("EMBEDDING_MODEL", "BAAI/bge-large-en-v1.5")
@@ -45,19 +48,15 @@ def test_bge():
 
 if __name__ == "__main__":
     print("=" * 60)
-    print("API CONNECTION TESTS - Phase 1 Day 1")
+    print("API CONNECTION TESTS")
     print("=" * 60)
-    
-    qwen_ok = test_qwen()
+
+    llm_ok = test_deepseek_llm()
     bge_ok = test_bge()
-    
+
     print("\n" + "=" * 60)
-    if qwen_ok and bge_ok:
+    if llm_ok and bge_ok:
         print("✅ ALL TESTS PASSED! Ready to build RAG.")
-        print("\nNext steps:")
-        print("  1. Implement PDF loading")
-        print("  2. Add text chunking")
-        print("  3. Generate embeddings")
     else:
-        print("❌ Some tests failed. Check your API keys in .env file")
+        print("❌ Some tests failed. Check ANTHROPIC_AUTH_TOKEN in .env")
     print("=" * 60)

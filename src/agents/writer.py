@@ -252,7 +252,8 @@ Answer (inline citations only, no Sources section):"""
         # Generate
         try:
             response = self.llm.invoke(prompt)
-            answer = response.content
+            from src.llm.content_utils import extract_llm_text
+            answer = extract_llm_text(response.content)
             
             return answer
             
@@ -363,7 +364,8 @@ Improved Answer:"""
         
         try:
             response = self.llm.invoke(prompt)
-            answer = response.content
+            from src.llm.content_utils import extract_llm_text
+            answer = extract_llm_text(response.content)
             
             return self._format_answer(answer, chunks)
             

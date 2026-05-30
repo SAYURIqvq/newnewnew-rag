@@ -38,45 +38,83 @@ except ImportError:
 
 # Page configuration
 st.set_page_config(
-    page_title="Agentic RAG System",
+    page_title="Agentic RAG Demo",
     page_icon="📚",
     layout="wide",
-    initial_sidebar_state="expanded"
+    initial_sidebar_state="expanded",
 )
 
 
-# Custom CSS for better styling
 st.markdown("""
 <style>
     .main-header {
-        font-size: 2.5rem;
-        font-weight: bold;
+        font-size: 2rem;
+        font-weight: 700;
         color: #1E88E5;
-        margin-bottom: 1rem;
+        margin-bottom: 0.25rem;
+        line-height: 1.2;
     }
     .sub-header {
-        font-size: 1.2rem;
-        color: #666;
-        margin-bottom: 2rem;
-    }
-    .stButton>button {
-        width: 100%;
-    }
-    .chat-message {
-        padding: 1rem;
-        border-radius: 0.5rem;
+        font-size: 1rem;
+        color: #607D8B;
         margin-bottom: 1rem;
+        line-height: 1.4;
     }
-    .user-message {
-        background-color: #E3F2FD;
+    .demo-footer {
+        text-align: center;
+        color: #78909C;
+        font-size: 0.85rem;
+        padding: 0.5rem 0;
+        line-height: 1.5;
     }
-    .assistant-message {
-        background-color: #F5F5F5;
+    .mode-pill {
+        display: inline-block;
+        padding: 0.2rem 0.6rem;
+        border-radius: 6px;
+        font-size: 0.85rem;
+        font-weight: 600;
+        background: #1E3A5F;
+        color: #E3F2FD;
+    }
+    .stButton>button[kind="primary"] {
+        width: 100%;
+        border-radius: 8px;
     }
 </style>
 """, unsafe_allow_html=True)
 
-st.session_state.embedder = EmbeddingGenerator()
+
+def _llm_api_key_ok() -> bool:
+    """True if a real DeepSeek / Anthropic-compatible API token is configured."""
+    from src.config import get_settings
+
+    key = (get_settings().anthropic_auth_token or "").strip()
+    if not key:
+        return False
+    placeholders = {
+        "your_deepseek_api_key_here",
+        "your_dashscope_key_here",
+        "changeme",
+        "sk-xxx",
+    }
+    return key.lower() not in placeholders
+
+
+def _rag_mode_short(mode=None) -> str:
+    """Short mode label for metrics (avoids Streamlit truncation)."""
+    mode = mode or st.session_state.get("rag_mode", "agentic")
+    return "Agentic" if mode == "agentic" else "Baseline"
+
+
+def _format_strategy_label(strategy) -> str:
+    """Human-readable strategy without special Unicode chars."""
+    if strategy is None:
+        return "N/A"
+    if hasattr(strategy, "value"):
+        return str(strategy.value).replace("_", " ").title()
+    text = str(strategy).strip()
+    return text.replace("_", " ").title() if text else "N/A"
+
 
 def init_session_state():
     """Initialize session state variables."""
@@ -115,32 +153,49 @@ def init_session_state():
     if 'knowledge_graph' not in st.session_state:
         st.session_state.knowledge_graph = None
 
+    # RAG mode for thesis demo: agentic (full) vs baseline (naive)
+    if 'rag_mode' not in st.session_state:
+        st.session_state.rag_mode = 'agentic'
+
 def display_header():
     """Display app header."""
-    
-    col1, col2 = st.columns([3, 1])
-    
+    mode_short = _rag_mode_short()
+    query_count = len([m for m in st.session_state.messages if m["role"] == "user"])
+
+    col1, col2, col3, col4 = st.columns([3.2, 1, 1, 1.2])
+
     with col1:
-        st.markdown('<p class="main-header">📚 Agentic RAG System</p>', 
-                   unsafe_allow_html=True)
-        st.markdown('<p class="sub-header">Intelligent Document Q&A with AI Agents</p>', 
-                   unsafe_allow_html=True)
-    
+        st.markdown(
+            '<p class="main-header">Agentic RAG Document Q&amp;A</p>',
+            unsafe_allow_html=True,
+        )
+        st.markdown(
+            '<p class="sub-header">Multi-agent retrieval-augmented generation with baseline comparison</p>',
+            unsafe_allow_html=True,
+        )
+
     with col2:
-        st.metric("Documents", len(st.session_state.documents))
-        st.metric("Messages", len(st.session_state.messages))
+        st.metric("Docs", len(st.session_state.documents))
+    with col3:
+        st.metric("Queries", query_count)
+    with col4:
+        st.markdown("**Mode**")
+        st.markdown(
+            f'<span class="mode-pill">{mode_short}</span>',
+            unsafe_allow_html=True,
+        )
 
 
 def sidebar():
     """Render sidebar with document upload and management."""
     
     with st.sidebar:
-        st.header("📁 Document Management")
+        st.markdown("### Documents & Settings")
         
         # ============================================
         # CHUNKING MODE SELECTOR (NEW)
         # ============================================
-        st.subheader("⚙️ Chunking Mode")
+        st.markdown("**Chunking**")
         chunking_mode = st.radio(
             "Select chunking strategy",
             options=['hierarchical', 'flat'],
@@ -164,11 +219,28 @@ def sidebar():
             st.info("📊 Chunks: 500 tokens")
         
         st.divider()
+
+        # ============================================
+        # RAG MODE (Baseline vs Agentic — thesis demo)
+        # ============================================
+        st.markdown("**Comparison**")
+        st.selectbox(
+            "RAG pipeline",
+            options=["agentic", "baseline"],
+            format_func=lambda x: {
+                "agentic": "Agentic RAG (proposed)",
+                "baseline": "Baseline (naive RAG)",
+            }[x],
+            label_visibility="collapsed",
+            key="rag_mode",
+        )
+        
+        st.divider()
         
         # ============================================
         # FILE UPLOADER (EXISTING - KEPT)
         # ============================================
-        st.subheader("Upload Document")
+        st.markdown("**Upload**")
         
         uploaded_file = st.file_uploader(
             "Choose a file",
@@ -188,7 +260,7 @@ def sidebar():
             - Size: {file_size:.1f} KB
             """)
             
-            if st.button("📤 Process Document", type="primary"):
+            if st.button("Process document", type="primary"):
                 process_uploaded_file(uploaded_file)
         
         st.divider()
@@ -196,7 +268,7 @@ def sidebar():
         # ============================================
         # DOCUMENT LIST (UPDATED WITH HIERARCHICAL INFO)
         # ============================================
-        st.subheader("📄 Uploaded Documents")
+        st.markdown("**Uploaded files**")
         
         if st.session_state.documents:
             for i, doc in enumerate(st.session_state.documents):
@@ -268,7 +340,7 @@ def sidebar():
         # SAMPLE QUESTIONS (EXISTING - KEPT)
         # ============================================
         if st.session_state.documents:
-            st.subheader("💡 Sample Questions")
+            st.markdown("**Sample questions**")
             
             sample_questions = [
                 "What is this document about?",
@@ -298,25 +370,24 @@ def sidebar():
         
         st.divider()
         
-        # ============================================
-        # SYSTEM STATUS (EXISTING - KEPT)
-        # ============================================
-        st.subheader("⚙️ System Status")
+        if not _llm_api_key_ok():
+            st.error("Set ANTHROPIC_AUTH_TOKEN in `.env` and refresh.")
+            st.divider()
+
+        st.markdown("**Status**")
         
         if st.session_state.rag_initialized:
-            st.success("✅ RAG System Ready")
-            
-            # Show ChromaDB stats ← NEW
+            st.success("System ready")
             try:
                 stats = st.session_state.vector_store.get_stats()
-                st.caption(f"💾 Vectors in DB: {stats['total_vectors']:,}")
-            except:
+                st.caption(f"Vectors indexed: {stats['total_vectors']:,}")
+            except Exception:
                 pass
         else:
-            st.warning("⏳ Upload a document to start")
+            st.warning("Upload a document to begin")
         
         # Clear chat button
-        if st.button("🗑️ Clear Chat History"):
+        if st.button("Clear chat"):
             st.session_state.messages = []
             try:
                 st.rerun()
@@ -682,13 +753,60 @@ def display_chat_interface():
     # Chat input
     if prompt := st.chat_input("Ask a question about your documents..."):
         if not st.session_state.rag_initialized:
-            st.warning("⚠️ Please upload a document first!")
+            st.warning("Please upload a document first.")
         else:
             process_user_query(prompt)
 
 
+def _append_assistant_response(
+    query: str,
+    result,
+    start_time: float,
+    rag_mode: str,
+    workflow_metadata: dict,
+    strategy_label: str,
+):
+    """Shared: citations, chat message, performance tracking."""
+    import time
+
+    citations = []
+    for i, chunk in enumerate(result.chunks[:5], 1):
+        citations.append({
+            "source_number": i,
+            "filename": chunk.metadata.get("filename", "unknown"),
+            "chunk_type": chunk.metadata.get("chunk_type", "unknown"),
+            "text_preview": chunk.text[:200],
+            "score": chunk.score or 0.0,
+        })
+
+    st.session_state.messages.append({
+        "role": "assistant",
+        "content": result.answer or "No answer generated. Check document index and API settings.",
+        "citations": citations,
+        "workflow_metadata": workflow_metadata,
+    })
+
+    latency = time.time() - start_time
+
+    if "performance_tracker" not in st.session_state:
+        from src.monitoring.performance_tracker import PerformanceTracker
+        st.session_state.performance_tracker = PerformanceTracker()
+
+    st.session_state.performance_tracker.track_query(
+        query=query,
+        latency=latency,
+        chunks_retrieved=len(result.chunks),
+        strategy=strategy_label,
+        iterations=workflow_metadata.get("regenerations", 0),
+        cache_hit=False,
+    )
+
+    print(f"⏱️  Total latency: {latency:.2f}s | mode={rag_mode}")
+    print("=" * 60 + "\n")
+
+
 def process_user_query(query: str):
-    """Process user query using complete LangGraph workflow."""
+    """Process user query (Baseline or Agentic, per sidebar selection)."""
     import time
     start_time = time.time()
     
@@ -702,14 +820,23 @@ def process_user_query(query: str):
     from src.agents.writer import WriterAgent
     from src.agents.critic import CriticAgent
     from src.config import get_settings
-    from src.llm.qwen import create_qwen_chat_model
+    from src.llm.chat_model import create_chat_model
     
+    rag_mode = st.session_state.get("rag_mode", "agentic")
+
     print("\n" + "="*60)
     print(f"🔍 Processing query: {query}")
+    print(f"   Mode: {rag_mode}")
     print("="*60)
     
     if not st.session_state.rag_initialized:
         st.error("Please upload a document first!")
+        return
+
+    if not _llm_api_key_ok():
+        st.error(
+            "Set a valid ANTHROPIC_AUTH_TOKEN (DeepSeek API key) in `.env`, then refresh and try again."
+        )
         return
     
     # Add user message
@@ -717,11 +844,47 @@ def process_user_query(query: str):
         "role": "user",
         "content": query
     })
+
+    # ========== BASELINE (Naive RAG) ==========
+    if rag_mode == "baseline":
+        from src.baselines.naive_rag import NaiveRAG
+
+        if not st.session_state.vector_store:
+            st.error("Vector store not initialized. Please re-upload your document.")
+            return
+
+        with st.spinner("📊 Running Baseline (Naive RAG)..."):
+            try:
+                naive = NaiveRAG(
+                    vector_store=st.session_state.vector_store,
+                    embedder=st.session_state.embedder,
+                )
+                result = naive.run(query)
+            except Exception as e:
+                print(f"❌ Baseline failed: {e}")
+                import traceback
+                traceback.print_exc()
+                st.error(f"Error: {e}")
+                return
+
+        _append_assistant_response(
+            query=query,
+            result=result,
+            start_time=start_time,
+            rag_mode="baseline",
+            workflow_metadata={
+                "rag_mode": "baseline",
+                "method": "naive_rag",
+                "chunks_used": len(result.chunks),
+            },
+            strategy_label="naive_baseline",
+        )
+        return
     
-    # ========== INITIALIZE AGENTS ==========
-    with st.spinner("⚙️ Initializing workflow..."):
+    # ========== INITIALIZE AGENTS (Agentic) ==========
+    with st.spinner("⚙️ Initializing Agentic workflow..."):
         settings = get_settings()
-        llm = create_qwen_chat_model(settings)
+        llm = create_chat_model(settings)
         
         # Initialize all agents
         planner = PlannerAgent(llm=llm)
@@ -771,90 +934,86 @@ def process_user_query(query: str):
         print("✅ Workflow initialized")
     
     # ========== RUN WORKFLOW ==========
-    with st.spinner("🚀 Running complete workflow..."):
+    with st.spinner("🤖 Running Agentic RAG workflow..."):
         try:
             # Single workflow call!
             result = workflow.run(query)
             
             print(f"✅ Workflow complete!")
             print(f"   Strategy: {result.strategy}")
-            print(f"   Complexity: {result.complexity:.2f}")
+            complexity = result.complexity
+            print(
+                f"   Complexity: {complexity:.2f}"
+                if complexity is not None
+                else "   Complexity: N/A"
+            )
             print(f"   Chunks: {len(result.chunks)}")
             print(f"   Retrieval rounds: {result.retrieval_round}")
             print(f"   Validation: {result.validation_status}")
-            print(f"   Critic score: {result.critic_score:.2f}")
+            critic = result.critic_score
+            print(
+                f"   Critic score: {critic:.2f}"
+                if critic is not None
+                else "   Critic score: N/A"
+            )
             print(f"   Regenerations: {result.metadata.get('regeneration_count', 0)}")
             
         except Exception as e:
             print(f"❌ Workflow failed: {e}")
             import traceback
             traceback.print_exc()
-            st.error(f"Error: {e}")
+            err_msg = f"Generation failed: {e}"
+            st.error(err_msg)
+            st.session_state.messages.append({
+                "role": "assistant",
+                "content": f"**Error:** {err_msg}\n\nTry **Baseline** mode or refresh the page.",
+                "workflow_metadata": {"rag_mode": "agentic", "error": str(e)},
+            })
             return
     
     # ========== PREPARE RESPONSE ==========
-    # Prepare citations
-    citations = []
-    for i, chunk in enumerate(result.chunks[:5], 1):
-        citations.append({
-            "source_number": i,
-            "filename": chunk.metadata.get('filename', 'unknown'),
-            "chunk_type": chunk.metadata.get('chunk_type', 'unknown'),
-            "text_preview": chunk.text[:200],
-            "score": chunk.score or 0.0
-        })
-    
-    # Add assistant message
-    st.session_state.messages.append({
-        "role": "assistant",
-        "content": result.answer,
-        "citations": citations,
-        "workflow_metadata": {
+    strategy_val = (
+        result.strategy.value
+        if hasattr(result.strategy, "value")
+        else str(result.strategy)
+    )
+    critic_decision = (
+        result.critic_decision.value
+        if result.critic_decision and hasattr(result.critic_decision, "value")
+        else None
+    )
+
+    _append_assistant_response(
+        query=query,
+        result=result,
+        start_time=start_time,
+        rag_mode="agentic",
+        workflow_metadata={
+            "rag_mode": "agentic",
             "complexity": result.complexity,
-            "strategy": result.strategy.value,
+            "strategy": strategy_val,
             "retrieval_rounds": result.retrieval_round,
             "validation_score": result.validation_score,
             "critic_score": result.critic_score,
-            "regenerations": result.metadata.get('regeneration_count', 0),
-            "decision": result.critic_decision.value
-        }
-    })
-    
-    # Calculate latency
-    latency = time.time() - start_time
-    
-    # Track performance
-    if 'performance_tracker' not in st.session_state:
-        from src.monitoring.performance_tracker import PerformanceTracker
-        st.session_state.performance_tracker = PerformanceTracker()
-    
-    st.session_state.performance_tracker.track_query(
-        query=query,
-        latency=latency,
-        chunks_retrieved=len(result.chunks),
-        strategy=result.strategy.value,
-        iterations=result.metadata.get('regeneration_count', 0),
-        cache_hit=False
+            "regenerations": result.metadata.get("regeneration_count", 0),
+            "decision": critic_decision,
+        },
+        strategy_label=strategy_val,
     )
-    
-    print(f"⏱️  Total latency: {latency:.2f}s")
-    print("="*60 + "\n")
 
 def display_footer():
-    """Display footer with info."""
-    
+    """Display demo footer."""
+    mode_short = _rag_mode_short()
+
     st.divider()
-    
-    col1, col2, col3 = st.columns(3)
-    
-    with col1:
-        st.caption("🚀 Phase 1 - Week 1 - Day 4")
-    
-    with col2:
-        st.caption("💡 Powered by Claude & Voyage AI")
-    
-    with col3:
-        st.caption("📊 Traditional RAG Baseline")
+    st.markdown(
+        f'<p class="demo-footer">'
+        f'Agentic RAG Thesis Demo &nbsp;|&nbsp; '
+        f'DeepSeek, BGE, ChromaDB, LangGraph &nbsp;|&nbsp; '
+        f'Mode: {mode_short}'
+        f'</p>',
+        unsafe_allow_html=True,
+    )
 
 def display_statistics():
     """Display system statistics with hierarchical info."""
@@ -877,15 +1036,13 @@ def display_statistics():
             st.metric("Queries", queries_count)
         
         with col4:
-            # Show mode
-            mode = st.session_state.chunking_mode
-            mode_icon = "🔺" if mode == 'hierarchical' else "📊"
-            st.metric("Mode", f"{mode_icon} {mode.title()}")
-        
+            chunk_mode = st.session_state.chunking_mode
+            chunk_label = "Hierarchical" if chunk_mode == "hierarchical" else "Flat"
+            st.metric("Chunking", chunk_label)
+
         with col5:
-            # Context size
-            if st.session_state.chunking_mode == 'hierarchical':
-                context = "2000 tok"
+            if st.session_state.chunking_mode == "hierarchical":
+                context = "2k tok"
             else:
                 context = "500 tok"
             st.metric("Context", context)
@@ -1085,7 +1242,7 @@ def display_document_preview():
                 
                 with col4:
                     mode = doc.get('chunking_mode', 'flat')
-                    st.metric("Mode", mode.title())
+                    st.metric("Chunking", "Hier" if mode == "hierarchical" else "Flat")
                 
                 # Show chunking info
                 if doc.get('chunking_mode') == 'hierarchical':
@@ -1125,20 +1282,26 @@ def display_chat_messages():
     
     if not st.session_state.messages:
         st.markdown("""
-        ### 👋 Welcome to Agentic RAG System!
-        
-        Upload a document from the sidebar to get started, then ask questions about it.
-        
-        **Features:**
-        - 🔺 Hierarchical chunking for better context
-        - 🔄 Self-reflection (Writer-Critic loop)
-        - 📊 Quality evaluation metrics
-        - 🎯 Intelligent retrieval
+        #### Welcome
+
+        1. **Upload** a document in the sidebar and wait for indexing  
+        2. Choose **Agentic RAG** or **Baseline** for comparison  
+        3. Ask a question below  
+
+        **Proposed system:** multi-agent orchestration, hybrid retrieval, self-reflection, GraphRAG
         """)
         return
     
     for message in st.session_state.messages:
         with st.chat_message(message["role"]):
+            if message["role"] == "assistant" and message.get("workflow_metadata"):
+                meta = message["workflow_metadata"]
+                if meta.get("rag_mode") == "baseline":
+                    st.caption("Baseline | naive vector RAG")
+                else:
+                    strategy = _format_strategy_label(meta.get("strategy"))
+                    st.caption(f"Agentic | strategy: {strategy}")
+
             st.markdown(message["content"])
             
             # Show self-reflection info (NEW)
@@ -1186,7 +1349,7 @@ def display_chat_input():
     
     # Only show if documents uploaded
     if not st.session_state.documents:
-        st.info("👆 Upload a document from the sidebar to start chatting")
+        st.info("Upload a document in the sidebar to start.")
         return
     
     # Handle sample query (if triggered from sidebar)
@@ -1202,6 +1365,9 @@ def display_chat_input():
     
     # Chat input (must be at root level, not in tabs/columns/expander)
     if prompt := st.chat_input("Ask a question about your documents..."):
+        if not _llm_api_key_ok():
+            st.error("Configure ANTHROPIC_AUTH_TOKEN in `.env` and refresh the page.")
+            return
         process_user_query(prompt)
         try:
             st.rerun()
@@ -1221,10 +1387,11 @@ def main():
     sidebar()
    
     # Main content tabs
-    tab1, tab2, tab3, tab4 = st.tabs(["💬 Chat", "📊 Evaluation", "📈 Statistics", "⚡ Performance"])
-    
+    tab1, tab2, tab3, tab4 = st.tabs(
+        ["Chat", "Evaluation", "Statistics", "Performance"]
+    )
+
     with tab1:
-        # Display chat history (inside tab OK)
         display_chat_messages()
     
     with tab2:

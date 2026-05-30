@@ -16,7 +16,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from src.evaluation.ragas_evaluator import RAGASEvaluator
-from langchain_openai import ChatOpenAI
+from src.config import get_settings
+from src.llm.chat_model import create_chat_model
 
 
 # ========== GENERATE ANSWER USING WRITER PROMPT ==========
@@ -26,12 +27,7 @@ def generate_answer(query: str, contexts: list[str]) -> str:
     Generate answer using the same prompt as WriterAgent.
     This ensures RAGAS scores the ACTUAL output of our system.
     """
-    llm = ChatOpenAI(
-        api_key=os.getenv("DASHSCOPE_API_KEY"),
-        base_url=os.getenv("QWEN_BASE_URL", "https://dashscope.aliyuncs.com/compatible-mode/v1"),
-        model=os.getenv("LLM_MODEL", "qwen-plus"),
-        temperature=0.0,
-    )
+    llm = create_chat_model(get_settings(), temperature=0.0)
 
     # Format context dengan numbering (sama seperti WriterAgent)
     context = "\n\n".join(

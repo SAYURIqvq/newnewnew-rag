@@ -3,8 +3,9 @@
 try:
     from .ragas_evaluator import RAGASEvaluator
     HAS_RAGAS = True
-except ImportError:
+except Exception:
     HAS_RAGAS = False
+    RAGASEvaluator = None  # type: ignore
 
 from .simple_evaluator import SimpleEvaluator
 

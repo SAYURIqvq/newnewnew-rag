@@ -13,16 +13,15 @@ class TestSettingsBasic:
     def test_production_settings_loads(self):
         """Test that production Settings class can load from .env"""
         settings = Settings()
-        if not settings.dashscope_api_key or not settings.voyage_api_key:
-            pytest.skip("Missing required API keys in .env")
-        assert settings.dashscope_api_key is not None
-        assert settings.voyage_api_key is not None
+        if not settings.anthropic_auth_token:
+            pytest.skip("Missing ANTHROPIC_AUTH_TOKEN in .env")
+        assert settings.anthropic_auth_token is not None
     
     def test_settings_has_required_fields(self):
         """Test that Settings has all required fields"""
         settings = Settings()
-        assert hasattr(settings, 'dashscope_api_key')
-        assert hasattr(settings, 'voyage_api_key')
+        assert hasattr(settings, 'anthropic_auth_token')
+        assert hasattr(settings, 'anthropic_base_url')
         assert hasattr(settings, 'chunk_size')
         assert hasattr(settings, 'log_level')
     
@@ -181,7 +180,9 @@ class TestFieldTypes:
         """Test string field types"""
         try:
             settings = Settings()
-            assert isinstance(settings.dashscope_api_key, str)
+            assert settings.anthropic_auth_token is None or isinstance(
+                settings.anthropic_auth_token, str
+            )
             assert isinstance(settings.voyage_api_key, str)
             assert isinstance(settings.llm_model, str)
             assert isinstance(settings.log_level, str)
