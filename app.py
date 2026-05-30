@@ -36,6 +36,7 @@ try:
 except ImportError:
     GRAPH_AVAILABLE = False
 
+
 # Page configuration
 st.set_page_config(
     page_title="Agentic RAG Demo",
@@ -43,6 +44,12 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded",
 )
+
+
+@st.cache_resource(show_spinner=False)
+def get_cached_embedder():
+    """Create one embedding model per Streamlit process."""
+    return EmbeddingGenerator()
 
 
 st.markdown("""
@@ -145,9 +152,8 @@ def init_session_state():
     
     # RAG components - FORCE REINITIALIZE
     if 'embedder' not in st.session_state or not hasattr(st.session_state.embedder, 'generate'):
-        from src.ingestion.embedder import EmbeddingGenerator
-        st.session_state.embedder = EmbeddingGenerator()
-        print("✅ Embedder reinitialized with EmbeddingGenerator")
+        st.session_state.embedder = get_cached_embedder()
+        print("✅ Embedder initialized from Streamlit cache")
 
     # Knowledge graph ← NEW
     if 'knowledge_graph' not in st.session_state:
@@ -461,8 +467,8 @@ def process_uploaded_file(uploaded_file):
         file_ext = file_path.suffix.upper()
         
         # ========== FORCE CLEAN REINIT ==========
-        # Always reinitialize to ensure clean state
-        st.session_state.embedder = EmbeddingGenerator()
+        # Reuse cached embedder while resetting document/index state.
+        st.session_state.embedder = get_cached_embedder()
         
         from src.storage.chroma_store import ChromaVectorStore
         
@@ -491,7 +497,7 @@ def process_uploaded_file(uploaded_file):
         progress_bar.progress(10)
         
         if not st.session_state.rag_initialized:
-            st.session_state.embedder = EmbeddingGenerator()
+            st.session_state.embedder = get_cached_embedder()
             
             # Use ChromaDB instead of in-memory ← CHANGED
             from src.storage.chroma_store import ChromaVectorStore

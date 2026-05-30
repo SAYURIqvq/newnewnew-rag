@@ -56,6 +56,11 @@ class Settings(BaseSettings):
         min_length=10,
     )
     embedding_model: str = Field(default="BAAI/bge-large-en-v1.5", description="Embedding model to use")
+    embedding_device: str = Field(
+        default="cpu",
+        description="Device for local sentence-transformer embeddings (cpu, mps, cuda)",
+        validation_alias=AliasChoices("EMBEDDING_DEVICE", "SENTENCE_TRANSFORMER_DEVICE"),
+    )
     embedding_dimension: int = Field(default=1024, description="Embedding vector dimension", gt=0)
     
     # ===== Chunking Configuration =====

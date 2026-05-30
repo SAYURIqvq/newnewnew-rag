@@ -19,6 +19,9 @@ class EmbeddingError(AgenticRAGException):
     pass
 
 
+_LOCAL_MODEL_CACHE: Dict[tuple[str, str], Any] = {}
+
+
 class EmbeddingGenerator:
     """
     Generate embeddings using local Sentence-Transformers (default) or Voyage AI (optional).
@@ -56,6 +59,7 @@ class EmbeddingGenerator:
         
         self.model = model or settings.embedding_model
         self.batch_size = batch_size or settings.batch_size
+        self.device = settings.embedding_device
 
         self._provider = "sentence_transformers"
         self.client = None
@@ -84,12 +88,28 @@ class EmbeddingGenerator:
                 os.environ.setdefault("TRANSFORMERS_NO_TF", "1")
                 os.environ.setdefault("USE_TF", "0")
                 from sentence_transformers import SentenceTransformer
-                self.client = SentenceTransformer(self.model)
-                self.logger.info(f"Initialized SentenceTransformer model: {self.model}")
+                cache_key = (self.model, self.device)
+                if cache_key not in _LOCAL_MODEL_CACHE:
+                    _LOCAL_MODEL_CACHE[cache_key] = SentenceTransformer(
+                        self.model,
+                        device=self.device,
+                    )
+                    self.logger.info(
+                        f"Initialized SentenceTransformer model: {self.model} on {self.device}"
+                    )
+                else:
+                    self.logger.info(
+                        f"Reusing SentenceTransformer model: {self.model} on {self.device}"
+                    )
+                self.client = _LOCAL_MODEL_CACHE[cache_key]
             except Exception as e:
                 raise EmbeddingError(
                     message=f"Failed to initialize SentenceTransformer model: {str(e)}",
-                    details={"embedding_model": self.model, "error": str(e)},
+                    details={
+                        "embedding_model": self.model,
+                        "embedding_device": self.device,
+                        "error": str(e),
+                    },
                 ) from e
         
         # Statistics
