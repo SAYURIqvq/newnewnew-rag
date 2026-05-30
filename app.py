@@ -1128,60 +1128,105 @@ def display_evaluation_interface():
     # Run evaluation button
     if st.button("🚀 Run Evaluation", type="primary"):
         from src.evaluation.simple_evaluator import SimpleEvaluator
+        from src.config import get_settings
+        from src.llm.chat_model import create_chat_model
+        from src.agents.planner import PlannerAgent
+        from src.agents.query_decomposer import QueryDecomposer
+        from src.agents.retrieval_coordinator import RetrievalCoordinator
+        from src.agents.validator import ValidatorAgent
+        from src.agents.synthesis import SynthesisAgent
         from src.agents.writer import WriterAgent
         from src.agents.critic import CriticAgent
-        from src.agents.self_reflection import SelfReflectionLoop
-        from src.models.agent_state import AgentState
-        
+        from src.orchestration.complete_workflow import CompleteAgenticRAGWorkflow
+        from src.retrieval.vector_search import VectorSearchAgent
+        from src.retrieval.keyword_search import KeywordSearchAgent
+        from src.retrieval.graph_search import GraphSearchAgent
+
+        if not _llm_api_key_ok():
+            st.error(
+                "Set a valid ANTHROPIC_AUTH_TOKEN (DeepSeek API key) in `.env`, then refresh and try again."
+            )
+            return
+
         evaluator = SimpleEvaluator()
-        
-        # Initialize agents
-        writer = WriterAgent()
-        critic = CriticAgent(quality_threshold=0.7)
-        loop = SelfReflectionLoop(writer, critic, max_iterations=3)
-        
+
+        with st.spinner("Initializing complete Agentic RAG workflow..."):
+            settings = get_settings()
+            llm = create_chat_model(settings)
+
+            vector_agent = VectorSearchAgent(
+                vector_store=st.session_state.vector_store,
+                embedder=st.session_state.embedder,
+            )
+            keyword_agent = KeywordSearchAgent(
+                vector_store=st.session_state.vector_store,
+            )
+            graph_agent = (
+                GraphSearchAgent(
+                    knowledge_graph=st.session_state.knowledge_graph,
+                    vector_store=st.session_state.vector_store,
+                )
+                if st.session_state.knowledge_graph
+                else None
+            )
+
+            coordinator = RetrievalCoordinator(
+                vector_agent=vector_agent,
+                keyword_agent=keyword_agent,
+                graph_agent=graph_agent,
+            )
+
+            workflow = CompleteAgenticRAGWorkflow(
+                planner=PlannerAgent(llm=llm),
+                decomposer=QueryDecomposer(),
+                coordinator=coordinator,
+                validator=ValidatorAgent(llm=llm),
+                synthesis=SynthesisAgent(),
+                writer=WriterAgent(llm=llm),
+                critic=CriticAgent(llm=llm, quality_threshold=0.7),
+            )
+
         # Process each question
         all_answers = []
         all_chunks_list = []
         all_metadata = []
+        all_workflow_rows = []
         
         progress_bar = st.progress(0)
         status_text = st.empty()
         
         for i, question in enumerate(questions):
-            status_text.text(f"Processing question {i+1}/{len(questions)}...")
-            
-            # Generate embedding
-            query_embedding = st.session_state.embedder.generate_query_embedding(question)
-            
-            # Search
-            search_results = st.session_state.vector_store.search(
-                query_embedding=query_embedding,
-                top_k=10,
-                return_parent=True
-            )
-            
-            # Convert to Chunk objects
-            from src.models.agent_state import Chunk
-            chunks = []
-            for result in search_results:
-                chunk = Chunk(
-                    text=result['text'],
-                    doc_id='unknown',
-                    chunk_id=result['chunk_id'],
-                    score=result['score'],
-                    metadata={'filename': 'uploaded_document'}
-                )
-                chunks.append(chunk)
-            
-            # Generate answer with self-reflection
-            state = AgentState(query=question, chunks=chunks)
-            result = loop.run(state)
-            
+            status_text.text(f"Running full Agentic workflow {i+1}/{len(questions)}...")
+
+            result = workflow.run(question)
+
             # Store results
-            all_answers.append(result.answer)
-            all_chunks_list.append(chunks)
-            all_metadata.append(result.metadata.get('self_reflection', {}))
+            all_answers.append(result.answer or "")
+            all_chunks_list.append(result.chunks)
+            all_metadata.append({
+                "self_reflection": {
+                    "iterations": result.metadata.get("regeneration_count", 0),
+                    "final_score": result.critic_score or 0.0,
+                    "final_decision": (
+                        result.critic_decision.value
+                        if result.critic_decision and hasattr(result.critic_decision, "value")
+                        else str(result.critic_decision)
+                    ),
+                    "improved": result.metadata.get("regeneration_count", 0) > 0,
+                }
+            })
+            all_workflow_rows.append({
+                "strategy": (
+                    result.strategy.value
+                    if hasattr(result.strategy, "value")
+                    else str(result.strategy)
+                ),
+                "retrieval_rounds": result.retrieval_round,
+                "validation_score": result.validation_score or 0.0,
+                "critic_score": result.critic_score or 0.0,
+                "reliability_passed": result.metadata.get("reliability_gate", {}).get("passed"),
+                "chunk_count": len(result.chunks),
+            })
             
             progress_bar.progress((i + 1) / len(questions))
         
@@ -1194,7 +1239,7 @@ def display_evaluation_interface():
         )
         
         # Display results
-        st.success("✅ Evaluation Complete!")
+        st.success("✅ Full Agentic Workflow Evaluation Complete!")
         
         st.markdown("### 📊 Overall Metrics")
         
@@ -1230,11 +1275,17 @@ def display_evaluation_interface():
         
         df_data = []
         for score in results['detailed_scores']:
+            workflow_row = all_workflow_rows[i]
             df_data.append({
                 'Question': score['query'][:50] + '...',
+                'Strategy': workflow_row['strategy'],
                 'Overall': f"{score['overall']:.1%}",
                 'Citations': '✅' if score['has_citations'] else '❌',
                 'Words': score['word_count'],
+                'Validation': f"{workflow_row['validation_score']:.1%}",
+                'Critic': f"{workflow_row['critic_score']:.1%}",
+                'Reliable': '✅' if workflow_row['reliability_passed'] else '❌',
+                'Chunks': workflow_row['chunk_count'],
                 'Improved': '✅' if score['was_improved'] else '➖',
                 'Iterations': score['iterations']
             })
