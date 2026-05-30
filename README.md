@@ -43,7 +43,7 @@ Query → Planner analyzes complexity
 
 ## 📊 RAGAS Evaluation Results
 
-Evaluated using the industry-standard **RAGAS framework**. LLM judge: Qwen. Embeddings: Voyage AI.
+Evaluated using the industry-standard **RAGAS framework**. LLM judge: DeepSeek. Embeddings: BGE-large.
 Answers were **generated at runtime** by the WriterAgent — not hand-written — so scores reflect real system output.
 
 | Test Case | Scenario | Faithfulness | Relevancy | Precision | Recall | Overall |
@@ -77,7 +77,7 @@ Full details → [docs/RAGAS_EVALUATION_REPORT.md](docs/RAGAS_EVALUATION_REPORT.
 
 ## ✨ Key Features
 
-### 🧠 Multi-Agent System (11 Agents, 3 Levels)
+### 🧠 Multi-Agent System (10 Core Agents + Reliability Gate, 3 Levels)
 
 **Strategic Layer**
 - **Planner** — Analyzes query complexity (0.0–1.0), selects strategy (Simple / Multi-hop / Graph)
@@ -89,9 +89,10 @@ Full details → [docs/RAGAS_EVALUATION_REPORT.md](docs/RAGAS_EVALUATION_REPORT.
 - **Synthesis** — Deduplicates across retrieval methods, applies hybrid scoring
 - **Writer** — Generates answers grounded strictly in context with inline citations
 - **Critic** — Reviews quality on 5 dimensions, regenerates with feedback if needed
+- **Reliability Gate** — Final deterministic grounding check for citations and prior quality scores
 
 **Operational Layer (Swarm — runs in parallel)**
-- **Vector Agent** — Semantic search via Voyage AI embeddings
+- **Vector Agent** — Semantic search via BGE embeddings
 - **Keyword Agent** — Exact-match BM25 scoring
 - **Graph Agent** — Relationship reasoning via knowledge-graph path finding
 
@@ -206,7 +207,7 @@ Relationship   (complexity > 0.7)   → Graph path finding → entity retrieval 
 ### Prerequisites
 
 ```
-Python 3.11+    Git    API keys: DashScope (Qwen) + Voyage AI
+Python 3.11+    Git    API key: DeepSeek-compatible chat model
 ```
 
 ### Installation
@@ -224,8 +225,9 @@ python -m spacy download en_core_web_md   # GraphRAG entity extraction
 
 cp .env.example .env
 # Fill in:
-#   DASHSCOPE_API_KEY=...
-#   VOYAGE_AI_API_KEY=pa-...
+#   ANTHROPIC_AUTH_TOKEN=...
+#   ANTHROPIC_BASE_URL=https://api.deepseek.com/anthropic
+#   EMBEDDING_MODEL=BAAI/bge-large-en-v1.5
 ```
 
 ### Run
@@ -268,8 +270,8 @@ When information is not available, the system says so explicitly — it does not
 
 | Layer | Technology | Role |
 |-------|-----------|------|
-| LLM | Qwen | Generation, validation, critique |
-| Embeddings | Voyage AI (`voyage-large-2-instruct`) | Semantic vectors |
+| LLM | DeepSeek via Anthropic-compatible API | Generation, validation, critique |
+| Embeddings | BGE-large (`BAAI/bge-large-en-v1.5`) | Semantic vectors |
 | Orchestration | LangChain + LangGraph | Agent wiring, state-machine workflows |
 | Vector DB | ChromaDB | Persistent vector storage |
 | Graph | NetworkX | Knowledge graph + path finding |
@@ -312,7 +314,7 @@ agentic-rag-system/
 │   │   ├── chroma_store.py
 │   │   └── database.py
 │   ├── evaluation/                  # Quality measurement
-│   │   ├── ragas_evaluator.py       # RAGAS (Qwen + Voyage override)
+│   │   ├── ragas_evaluator.py       # RAGAS (DeepSeek + BGE override)
 │   │   └── simple_evaluator.py      # Lightweight rule-based metrics
 │   ├── orchestration/               # LangGraph workflows
 │   ├── models/                      # Pydantic data models
@@ -353,7 +355,7 @@ pytest tests/e2e/                                    # end-to-end tests
 # RAGAS pipeline — mocked, no API cost
 pytest tests/evaluation/test_ragas_evaluation.py -v  # 17 tests
 
-# RAGAS — live scores (calls Qwen + Voyage)
+# RAGAS — live scores (calls DeepSeek + BGE)
 python tests/evaluation/test_ragas_real.py
 
 # Ablation study
@@ -402,8 +404,8 @@ MIT License — see [LICENSE](LICENSE)
 
 ## 🙏 Acknowledgments
 
-- **Alibaba Cloud DashScope** — Qwen
-- **Voyage AI** — Embedding model
+- **DeepSeek** — LLM API
+- **BAAI BGE** — Embedding model
 - **Microsoft Research** — GraphRAG methodology
 - **LangChain / LangGraph** — Orchestration framework
 - **RAGAS** — Evaluation framework

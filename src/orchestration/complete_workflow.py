@@ -19,6 +19,7 @@ from src.agents.validator import ValidatorAgent
 from src.agents.synthesis import SynthesisAgent
 from src.agents.writer import WriterAgent
 from src.agents.critic import CriticAgent, CriticDecision
+from src.agents.reliability_gate import ReliabilityGate
 from src.utils.logger import setup_logger
 from src.utils.exceptions import OrchestrationError
 
@@ -83,7 +84,8 @@ class CompleteAgenticRAGWorkflow:
         validator: ValidatorAgent,
         synthesis: SynthesisAgent,
         writer: WriterAgent,
-        critic: CriticAgent
+        critic: CriticAgent,
+        reliability_gate: ReliabilityGate = None
     ):
         """
         Initialize complete LangGraph workflow.
@@ -104,6 +106,7 @@ class CompleteAgenticRAGWorkflow:
         self.synthesis = synthesis
         self.writer = writer
         self.critic = critic
+        self.reliability_gate = reliability_gate or ReliabilityGate()
         
         self.logger = setup_logger("complete_workflow", level="INFO")
         
@@ -567,16 +570,22 @@ class CompleteAgenticRAGWorkflow:
             # Run workflow
             final_state = self.workflow.invoke(initial_state)
             
-            # Extract agent state
-            final_agent_state = final_state["agent_state"]
+            # Extract agent state and run final deterministic reliability gate.
+            final_agent_state = self.reliability_gate.apply(final_state["agent_state"])
             
+            critic_score = final_agent_state.critic_score
+            critic_score_label = f"{critic_score:.2f}" if critic_score is not None else "N/A"
+            strategy = final_agent_state.strategy
+            strategy_label = strategy.value if hasattr(strategy, "value") else str(strategy)
+
             self.logger.info(
                 f"✅ Workflow completed: "
-                f"strategy={final_agent_state.strategy.value}, "
+                f"strategy={strategy_label}, "
                 f"chunks={len(final_agent_state.chunks)}, "
                 f"retrieval_rounds={final_agent_state.retrieval_round}, "
                 f"validation={final_agent_state.validation_status}, "
-                f"critic_score={final_agent_state.critic_score:.2f}, "
+                f"critic_score={critic_score_label}, "
+                f"reliability={final_agent_state.metadata.get('reliability_gate', {}).get('passed')}, "
                 f"regenerations={final_agent_state.metadata.get('regeneration_count', 0)}"
             )
             

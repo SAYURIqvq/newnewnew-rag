@@ -1,6 +1,7 @@
 """
 RAGAS-based evaluation for RAG system.
-Override default OpenAI LLM ke Claude (Anthropic).
+Override default OpenAI models with the project's DeepSeek-compatible LLM
+and BGE embedding model.
 """
 
 import os
@@ -57,7 +58,7 @@ class BGELargeEmbeddings(Embeddings):
 class RAGASEvaluator:
     """
     Evaluate RAG system using RAGAS framework.
-    Uses Claude (LLM) + Voyage AI (Embeddings).
+    Uses DeepSeek (LLM) + BGE-large (embeddings).
     """
 
     def __init__(self, model: str = None):
@@ -103,7 +104,7 @@ class RAGASEvaluator:
 
         dataset = Dataset.from_dict(data)
 
-        print("   Running RAGAS evaluation with Qwen + BGE-large...")
+        print("   Running RAGAS evaluation with DeepSeek + BGE-large...")
 
         # ← Pass BOTH llm and embeddings
         results = evaluate(

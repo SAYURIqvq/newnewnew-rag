@@ -1,13 +1,9 @@
 """
-Graph Search Agent - Operational Level 3 Agent.
+Test-only graph retrieval agent.
 
-Performs graph-based retrieval using entity relationships.
-This is a MOCK implementation for testing the coordinator.
-
-Real implementation will use:
-- NetworkX or Neo4j for graph storage
-- Entity extraction (spaCy)
-- Path finding algorithms
+This module is kept for legacy unit/integration tests that use deterministic
+mock chunks. Production code uses src.retrieval.graph_search.GraphSearchAgent,
+which connects to KnowledgeGraph, GraphRetrieval, and ChromaDB.
 """
 
 from typing import List
@@ -19,13 +15,14 @@ from src.utils.exceptions import RetrievalError
 
 class GraphSearchAgent(BaseAgent):
     """
-    Graph Search Agent - Relationship-based retrieval (MOCK).
+    Legacy test Graph Search Agent - relationship-based mock retrieval.
     
     Performs graph traversal to find chunks related through
     entity relationships and knowledge graph connections.
     
-    NOTE: This is a mock implementation that returns dummy chunks.
-    Real implementation will use NetworkX/Neo4j with entity graphs.
+    NOTE: Do not use this class in the application workflow. It returns
+    deterministic dummy chunks for tests. Use src.retrieval.graph_search for
+    the implemented graph-based retrieval path.
     
     Attributes:
         top_k: Number of chunks to retrieve
@@ -178,6 +175,6 @@ class GraphSearchAgent(BaseAgent):
             List of chunks from graph traversal
         """
         raise NotImplementedError(
-            "Real graph search not implemented yet. "
-            "Will be implemented in Week 9-10 (GraphRAG phase)."
+            "This legacy test agent does not implement real graph search. "
+            "Use src.retrieval.graph_search.GraphSearchAgent instead."
         )

@@ -13,6 +13,7 @@ Swarm Pattern:
 """
 
 import asyncio
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import List, Dict, Any
 from collections import defaultdict
 import hashlib
@@ -124,7 +125,7 @@ class RetrievalCoordinator(BaseAgent):
             )
             
             # Step 1: Spawn retrieval swarm
-            all_results = self._spawn_swarm(query)
+            all_results, swarm_metadata = self._spawn_swarm_with_metadata(query)
             
             self.log(
                 f"Retrieved {len(all_results)} total chunks from swarm",
@@ -157,7 +158,8 @@ class RetrievalCoordinator(BaseAgent):
                 "total_retrieved": len(all_results),
                 "unique_chunks": len(unique_chunks),
                 "final_chunks": len(top_chunks),
-                "parallel": self.parallel
+                "parallel": self.parallel,
+                **swarm_metadata,
             }
             
             return state
@@ -172,6 +174,11 @@ class RetrievalCoordinator(BaseAgent):
     
     def _spawn_swarm(self, query: str) -> List[Chunk]:
         """Spawn retrieval swarm (private method)."""
+        chunks, _ = self._spawn_swarm_with_metadata(query)
+        return chunks
+
+    def _spawn_swarm_with_metadata(self, query: str) -> tuple[List[Chunk], Dict[str, Any]]:
+        """Spawn retrieval swarm and return chunks plus execution metadata."""
         
         self.log(f"Spawning retrieval swarm for: {query}")
         
@@ -190,21 +197,83 @@ class RetrievalCoordinator(BaseAgent):
         else:
             self.log("Graph search unavailable", level="warning")
         
-        # Execute agents
+        metadata = {
+            "agents_requested": [name for name, _ in agents],
+            "agent_counts": {},
+            "agent_errors": {},
+            "execution_mode": "parallel" if self.parallel else "sequential",
+        }
+
+        if self.parallel and len(agents) > 1:
+            all_results = self._execute_swarm_parallel(agents, query, metadata)
+        else:
+            all_results = self._execute_swarm_sequential(agents, query, metadata)
+
+        self.log(f"Swarm complete: {len(all_results)} chunks from {len(agents)} agents")
+
+        return all_results, metadata
+
+    def _execute_swarm_sequential(
+        self,
+        agents: List[tuple[str, BaseAgent]],
+        query: str,
+        metadata: Dict[str, Any]
+    ) -> List[Chunk]:
+        """Execute retrieval agents one by one."""
         all_results = []
-        
+
         for agent_name, agent in agents:
             self.log(f"Executing {agent_name} agent...")
             try:
-                results = agent.search_async(query, top_k=self.top_k)
+                results = self._search_agent(agent, query)
+                metadata["agent_counts"][agent_name] = len(results)
                 self.log(f"{agent_name}: {len(results)} chunks")
                 all_results.extend(results)
             except Exception as e:
+                metadata["agent_errors"][agent_name] = str(e)
+                metadata["agent_counts"][agent_name] = 0
                 self.log(f"{agent_name} failed: {e}", level="error")
-        
-        self.log(f"Swarm complete: {len(all_results)} chunks from {len(agents)} agents")
-        
+
         return all_results
+
+    def _execute_swarm_parallel(
+        self,
+        agents: List[tuple[str, BaseAgent]],
+        query: str,
+        metadata: Dict[str, Any]
+    ) -> List[Chunk]:
+        """Execute retrieval agents concurrently using worker threads."""
+        all_results = []
+        max_workers = min(len(agents), 3)
+
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            futures = {
+                executor.submit(self._search_agent, agent, query): agent_name
+                for agent_name, agent in agents
+            }
+
+            for future in as_completed(futures):
+                agent_name = futures[future]
+                try:
+                    results = future.result()
+                    metadata["agent_counts"][agent_name] = len(results)
+                    self.log(f"{agent_name}: {len(results)} chunks")
+                    all_results.extend(results)
+                except Exception as e:
+                    metadata["agent_errors"][agent_name] = str(e)
+                    metadata["agent_counts"][agent_name] = 0
+                    self.log(f"{agent_name} failed: {e}", level="error")
+
+        return all_results
+
+    def _search_agent(self, agent: BaseAgent, query: str) -> List[Chunk]:
+        """Run a retrieval agent through its preferred search interface."""
+        if hasattr(agent, "search_async"):
+            return agent.search_async(query, top_k=self.top_k)
+
+        temp_state = AgentState(query=query)
+        result_state = agent.run(temp_state)
+        return result_state.chunks
     
     def _execute_parallel(self, query: str) -> List[Chunk]:
         """

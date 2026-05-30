@@ -748,6 +748,12 @@ def display_chat_interface():
                     with st.expander("📚 View Sources"):
                         for citation in message["citations"]:
                             st.caption(f"**Source {citation['source_number']}** (Score: {citation['score']:.4f})")
+                            if citation.get("retrieval_source"):
+                                st.caption(f"Retrieval: {citation['retrieval_source']}")
+                            if citation.get("graph_paths"):
+                                st.caption("Graph reasoning paths:")
+                                for path in citation["graph_paths"][:3]:
+                                    st.code(path.get("description", ""), language="text")
                             st.text(citation['text_preview'])
     
     # Chat input
@@ -775,6 +781,8 @@ def _append_assistant_response(
             "source_number": i,
             "filename": chunk.metadata.get("filename", "unknown"),
             "chunk_type": chunk.metadata.get("chunk_type", "unknown"),
+            "retrieval_source": chunk.metadata.get("source") or chunk.metadata.get("retrieval_method"),
+            "graph_paths": chunk.metadata.get("graph_paths", []),
             "text_preview": chunk.text[:200],
             "score": chunk.score or 0.0,
         })

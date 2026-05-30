@@ -20,6 +20,7 @@ flowchart TB
     SY[Synthesis]
     W[Writer]
     CR[Critic]
+    RG[Reliability Gate]
   end
 
   subgraph Retrieval["Retrieval Layer"]
@@ -42,9 +43,10 @@ flowchart TB
   RC --> VS & BM & GR
   VS & BM --> CH
   GR --> KG
-  RC --> V --> SY --> W --> CR
+  RC --> V --> SY --> W --> CR --> RG
   W --> CR
   CR -->|regenerate| W
+  RG --> A[Final Answer]
   V -->|retry| RC
   VS --> EMB
   W & P & V & CR --> LLM
@@ -71,7 +73,8 @@ flowchart LR
     V2 --> S2[Synthesis]
     S2 --> W2[Writer]
     W2 --> C2[Critic]
-    C2 --> A2[Answer]
+    C2 --> G2[Reliability Gate]
+    G2 --> A2[Answer]
   end
 ```
 
@@ -91,6 +94,7 @@ Unlike fixed pipelines, the system selects strategies (simple / multi-hop / grap
 
 - **Validator**: retrieval sufficiency, optional re-retrieval.  
 - **Critic**: answer quality loop with regeneration.
+- **Reliability Gate**: deterministic final check for citations, context availability, validation score, and critic score.
 
 ### 4. GraphRAG for relational questions
 

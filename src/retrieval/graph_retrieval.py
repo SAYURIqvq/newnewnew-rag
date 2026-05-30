@@ -92,8 +92,48 @@ class GraphRetrieval:
             paths,
             path_entities
         )
+
+        # Preserve graph evidence for downstream citation/UI/analysis.
+        path_evidence = self._format_path_evidence(paths[:5])
+        for chunk in ranked_chunks:
+            chunk.metadata["retrieval_method"] = "graph"
+            chunk.metadata["graph_entities"] = sorted(path_entities)
+            chunk.metadata["graph_paths"] = path_evidence
         
         return ranked_chunks[:top_k]
+
+    def _format_path_evidence(self, paths: List[Dict]) -> List[Dict]:
+        """
+        Convert ranked graph paths into compact, serializable evidence.
+
+        Args:
+            paths: Path dictionaries returned by GraphTraversalAgent
+
+        Returns:
+            List of path evidence dictionaries for metadata/UI display
+        """
+        evidence = []
+
+        for path_dict in paths:
+            relations = path_dict.get("relations", [])
+            path = path_dict.get("path", [])
+
+            if relations:
+                description = " -> ".join(
+                    f"{rel.get('from')} --[{rel.get('relation', 'related_to')}]--> {rel.get('to')}"
+                    for rel in relations
+                )
+            else:
+                description = " -> ".join(path)
+
+            evidence.append({
+                "path": path,
+                "relations": relations,
+                "score": path_dict.get("score", 0.0),
+                "description": description,
+            })
+
+        return evidence
     
     def _collect_path_entities(self, paths: List[Dict]) -> Set[str]:
         """
@@ -217,7 +257,7 @@ class GraphRetrieval:
             # Count entity mentions
             entity_count = sum(
                 1 for entity in path_entities
-                if entity in text_lower
+                if entity.lower() in text_lower
             )
             
             # Bonus for mentioning high-score path entities
@@ -227,7 +267,7 @@ class GraphRetrieval:
                 path_score = path_dict.get('score', 0)
                 
                 # Check if chunk mentions path
-                path_mentions = sum(1 for entity in path if entity in text_lower)
+                path_mentions = sum(1 for entity in path if entity.lower() in text_lower)
                 if path_mentions >= 2:  # Mentions 2+ entities from path
                     path_bonus += path_score * 0.5
             
