@@ -1082,24 +1082,43 @@ def display_evaluation_interface():
     # Load test questions
     import json
     from pathlib import Path
-    
-    test_file = Path("data/test_questions.json")
-    
-    if not test_file.exists():
-        st.warning("⚠️ Test questions file not found: data/test_questions.json")
-        st.info("Create this file with your test questions first.")
+
+    candidate_files = [
+        Path("data/test_questions.json"),
+        Path("data/evaluation/thesis_test_dataset.json"),
+        Path("data/evaluation/test_dataset.json"),
+        Path("tests/fixtures/test_dataset.json"),
+    ]
+    test_file = next((path for path in candidate_files if path.exists()), None)
+
+    if test_file is None:
+        st.warning("⚠️ No evaluation dataset found")
+        st.info(
+            "Expected one of: data/test_questions.json, "
+            "data/evaluation/thesis_test_dataset.json, "
+            "data/evaluation/test_dataset.json, tests/fixtures/test_dataset.json"
+        )
         return
-    
+
     with open(test_file, 'r') as f:
         test_data = json.load(f)
-    
-    questions = test_data.get('questions', [])
-    
+
+    if "questions" in test_data:
+        questions = test_data.get("questions", [])
+    elif "test_cases" in test_data:
+        questions = [
+            case.get("question", "")
+            for case in test_data.get("test_cases", [])
+            if case.get("question")
+        ]
+    else:
+        questions = []
+
     if not questions:
-        st.warning("No questions found in test file")
+        st.warning(f"No questions found in test file: {test_file}")
         return
-    
-    st.info(f"📝 Loaded {len(questions)} test questions")
+
+    st.info(f"📝 Loaded {len(questions)} test questions from `{test_file}`")
     
     # Show sample questions
     with st.expander("👁️ View Test Questions"):
