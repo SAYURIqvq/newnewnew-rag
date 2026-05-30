@@ -117,63 +117,129 @@ Relationship   (complexity > 0.7)   → Graph path finding → entity retrieval
 
 ## Architecture
 
+```mermaid
+flowchart TD
+    A[User Interface<br/>Streamlit App] --> B[Planner Agent<br/>L1 Decision Layer<br/>complexity → strategy]
+    B --> C[Query Decomposer<br/>split query into subtasks]
+
+    C --> D1[Vector Agent<br/>semantic retrieval]
+    C --> D2[Keyword Agent<br/>lexical retrieval]
+    C --> D3[Graph Agent<br/>relation-based retrieval]
+
+    subgraph L3[Level 3 — Retrieval Swarm]
+        D1
+        D2
+        D3
+    end
+
+    D1 --> E[Validator Agent<br/>L2 Quality Gate<br/>evidence relevance check]
+    D2 --> E
+    D3 --> E
+
+    E --> F[Synthesis Agent<br/>L2 Fusion Layer<br/>deduplicate + hybrid rerank]
+    F --> G[Writer Agent<br/>generate answer + citations]
+    G --> H[Critic Agent<br/>review answer quality]
+    H --> I[Reliability Gate<br/>grounding + citation check]
+    I --> J[Final Answer<br/>with Citations]
+
+    E -. weak evidence<br/>retry max 2 .-> C
+    H -. low quality<br/>regenerate max 3 .-> G
 ```
-                          ┌──────────────────┐
-                          │  USER (Streamlit) │
-                          └────────┬─────────┘
-                                   ▼
-                          ┌──────────────────┐
-                          │   PLANNER (L1)    │
-                          │ complexity→strategy│
-                          └────────┬─────────┘
-                                   ▼
-                          ┌──────────────────┐
-                          │ QUERY DECOMPOSER  │
-                          └────────┬─────────┘
-                                   ▼
-                ┌──────────────────┼──────────────────┐
-                ▼                  ▼                  ▼
-         ┌──────────┐      ┌──────────┐      ┌──────────┐
-         │  Vector  │      │ Keyword  │      │  Graph   │  L3 Swarm
-         │  Agent   │      │  Agent   │      │  Agent   │  (parallel)
-         └────┬─────┘      └────┬─────┘      └────┬─────┘
-              └────────────────┼─────────────────┘
-                               ▼
-                     ┌──────────────────┐
-                     │  VALIDATOR (L2)   │◄── retry (max 2)
-                     │  quality gate     │
-                     └────────┬─────────┘
-                              ▼
-                     ┌──────────────────┐
-                     │  SYNTHESIS (L2)   │
-                     │ dedupe+hybrid rank│
-                     └────────┬─────────┘
-                              ▼
-                     ┌──────────────────┐
-                     │   WRITER (L2)     │◄──────────┐
-                     │ generate+citations│           │
-                     └────────┬─────────┘           │
-                              ▼                      │
-                     ┌──────────────────┐           │
-                     │   CRITIC (L2)     │           │
-                     │ review→regenerate?│──┐        │ regenerate
-                     └────────┬─────────┘  │        │ (max 3)
-                              ▼             │        │
-                     ┌──────────────────┐  │        │
-                     │ RELIABILITY GATE  │  │        │
-                     │ grounding check   │  │        │
-                     └────────┬─────────┘  │        │
-                              ▼             │        │
-                     ┌──────────────────┐  │        │
-                     │ Answer+Citations  │  │        │
-                     └──────────────────┘  │        │
-                                           │        │
-              ┌────────────────────────────┘        │
-              │  Two feedback loops:                │
-              │  1. Validator → back to Retrieval ◄─┘
-              │  2. Writer ↔ Critic self-reflection
-              └─────────────────────────────────────
+
+<details>
+<summary>Text diagram</summary>
+
 ```
+┌──────────────────────────────────────────────────────────────────────┐
+│                         Agentic RAG Workflow                         │
+└──────────────────────────────────────────────────────────────────────┘
+
+                              ┌────────────────────┐
+                              │  User Interface     │
+                              │  Streamlit App      │
+                              └──────────┬─────────┘
+                                         │
+                                         ▼
+                              ┌────────────────────┐
+                              │  Planner Agent      │
+                              │  L1 Decision Layer  │
+                              │  complexity → plan  │
+                              └──────────┬─────────┘
+                                         │
+                                         ▼
+                              ┌────────────────────┐
+                              │  Query Decomposer  │
+                              │  split into tasks   │
+                              └──────────┬─────────┘
+                                         │
+                 ┌───────────────────────┼───────────────────────┐
+                 │                       │                       │
+                 ▼                       ▼                       ▼
+        ┌────────────────┐      ┌────────────────┐      ┌────────────────┐
+        │  Vector Agent   │      │  Keyword Agent  │      │  Graph Agent    │
+        │  semantic search│      │  lexical search │      │  relation search│
+        └───────┬────────┘      └───────┬────────┘      └───────┬────────┘
+                │                       │                       │
+                └───────────────────────┼───────────────────────┘
+                                        │
+                                        ▼
+                              ┌────────────────────┐
+                              │  Validator Agent    │
+                              │  L2 Quality Gate    │
+                              │  check relevance    │
+                              └──────────┬─────────┘
+                                         │
+                         retry retrieval │ if evidence is weak
+                              max 2 times │
+                                         ▼
+                              ┌────────────────────┐
+                              │  Synthesis Agent    │
+                              │  L2 Fusion Layer    │
+                              │  dedupe + rerank    │
+                              └──────────┬─────────┘
+                                         │
+                                         ▼
+                              ┌────────────────────┐
+                              │  Writer Agent       │
+                              │  generate answer    │
+                              │  add citations      │
+                              └──────────┬─────────┘
+                                         │
+                                         ▼
+                              ┌────────────────────┐
+                              │  Critic Agent       │
+                              │  review quality     │
+                              │  ask regeneration?  │
+                              └──────────┬─────────┘
+                                         │
+                        regenerate answer │ if quality is low
+                              max 3 times │
+                                         ▼
+                              ┌────────────────────┐
+                              │  Reliability Gate   │
+                              │  grounding check    │
+                              │  citation check     │
+                              └──────────┬─────────┘
+                                         │
+                                         ▼
+                              ┌────────────────────┐
+                              │  Final Answer       │
+                              │  with Citations     │
+                              └────────────────────┘
+
+
+Feedback Mechanisms
+──────────────────────────────────────────────────────────────────────
+1. Validator Loop
+   If retrieved evidence is incomplete or weak, the system sends the
+   query back to the retrieval agents for another search round.
+
+2. Critic Loop
+   If the generated answer is unclear, poorly grounded, or weakly
+   cited, the Writer Agent regenerates the response before final output.
+```
+
+</details>
 
 ---
 
