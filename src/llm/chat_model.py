@@ -1,10 +1,10 @@
 """
-LLM chat model factory — DeepSeek via Anthropic-compatible API.
+LLM chat model factory — OpenRouter via OpenAI-compatible API.
 
 Configure in `.env` (or shell exports):
-  ANTHROPIC_BASE_URL=https://api.deepseek.com/anthropic
-  ANTHROPIC_AUTH_TOKEN=sk-...
-  ANTHROPIC_MODEL=deepseek-chat
+  OPENROUTER_API_KEY=sk-or-...
+  OPENAI_BASE_URL=https://openrouter.ai/api/v1
+  OPENAI_MODEL=deepseek/deepseek-v4-flash
 """
 
 from __future__ import annotations
@@ -49,8 +49,8 @@ class _NormalizedLLMWrapper(Runnable):
         response.content = text
         return response
 
-DEFAULT_ANTHROPIC_BASE_URL = "https://api.deepseek.com/anthropic"
-DEFAULT_LLM_MODEL = "deepseek-chat"
+DEFAULT_OPENAI_BASE_URL = "https://openrouter.ai/api/v1"
+DEFAULT_LLM_MODEL = "deepseek/deepseek-v4-flash"
 
 
 def create_chat_model(
@@ -59,28 +59,29 @@ def create_chat_model(
     model: Optional[str] = None,
     temperature: Optional[float] = None,
     max_tokens: Optional[int] = None,
+    reasoning_effort: Optional[str] = None,
 ) -> BaseChatModel:
-    """Create ChatAnthropic pointed at DeepSeek (or any Anthropic-compatible endpoint)."""
+    """Create ChatOpenAI pointed at OpenRouter or another OpenAI-compatible endpoint."""
     api_key = settings.anthropic_auth_token
     if not api_key:
         raise ConfigurationError(
-            message="Missing LLM API key (set ANTHROPIC_AUTH_TOKEN in .env)",
-            config_key="ANTHROPIC_AUTH_TOKEN",
+            message="Missing LLM API key (set OPENROUTER_API_KEY in .env)",
+            config_key="OPENROUTER_API_KEY",
         )
 
-    base_url = settings.anthropic_base_url or DEFAULT_ANTHROPIC_BASE_URL
+    base_url = settings.anthropic_base_url or DEFAULT_OPENAI_BASE_URL
     model_name = model or settings.llm_model or DEFAULT_LLM_MODEL
 
-    # LangChain reads ANTHROPIC_API_KEY; keep env in sync for downstream tools
-    os.environ.setdefault("ANTHROPIC_API_KEY", api_key)
-    os.environ.setdefault("ANTHROPIC_BASE_URL", base_url)
+    # LangChain/OpenAI-compatible clients read OPENAI_*; keep env in sync.
+    os.environ.setdefault("OPENAI_API_KEY", api_key)
+    os.environ.setdefault("OPENAI_BASE_URL", base_url)
 
     try:
-        from langchain_anthropic import ChatAnthropic
+        from langchain_openai import ChatOpenAI
     except ImportError as e:
         raise ConfigurationError(
-            message="langchain-anthropic is not installed. Run: pip install langchain-anthropic",
-            config_key="ANTHROPIC_AUTH_TOKEN",
+            message="langchain-openai is not installed. Run: pip install langchain-openai",
+            config_key="OPENROUTER_API_KEY",
         ) from e
 
     kwargs = {
@@ -89,6 +90,15 @@ def create_chat_model(
         "base_url": base_url,
         "temperature": settings.llm_temperature if temperature is None else temperature,
         "max_tokens": settings.llm_max_tokens if max_tokens is None else max_tokens,
+        "timeout": settings.request_timeout,
+        "max_retries": 2,
     }
-    llm = ChatAnthropic(**kwargs)
+    if reasoning_effort is not None and "openrouter.ai" in base_url:
+        kwargs["extra_body"] = {
+            "reasoning": {
+                "effort": reasoning_effort,
+                "exclude": True,
+            }
+        }
+    llm = ChatOpenAI(**kwargs)
     return _NormalizedLLMWrapper(llm)  # type: ignore[return-value]

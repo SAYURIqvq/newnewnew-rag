@@ -27,7 +27,11 @@ def create_agentic_workflow(
 ) -> CompleteAgenticRAGWorkflow:
     """Create CompleteAgenticRAGWorkflow using on-disk Chroma + optional graph."""
     settings = get_settings()
-    llm = create_qwen_chat_model(settings)
+    planner_llm = create_qwen_chat_model(settings, model=settings.get_agent_model("planner"))
+    decomposer_llm = create_qwen_chat_model(settings, model=settings.get_agent_model("decomposer"), max_tokens=1000)
+    validator_llm = create_qwen_chat_model(settings, model=settings.get_agent_model("validator"))
+    writer_llm = create_qwen_chat_model(settings, model=settings.get_agent_model("writer"))
+    critic_llm = create_qwen_chat_model(settings, model=settings.get_agent_model("critic"))
 
     vector_store = ChromaVectorStore(persist_directory=persist_directory)
     embedder = EmbeddingGenerator()
@@ -58,11 +62,11 @@ def create_agentic_workflow(
     )
 
     return CompleteAgenticRAGWorkflow(
-        planner=PlannerAgent(llm=llm),
-        decomposer=QueryDecomposer(),
+        planner=PlannerAgent(llm=planner_llm),
+        decomposer=QueryDecomposer(llm=decomposer_llm),
         coordinator=coordinator,
-        validator=ValidatorAgent(llm=llm),
+        validator=ValidatorAgent(llm=validator_llm),
         synthesis=SynthesisAgent(),
-        writer=WriterAgent(llm=llm),
-        critic=CriticAgent(llm=llm, quality_threshold=0.7),
+        writer=WriterAgent(llm=writer_llm),
+        critic=CriticAgent(llm=critic_llm, quality_threshold=0.7),
     )

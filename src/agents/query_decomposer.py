@@ -24,7 +24,12 @@ class QueryDecomposer(BaseAgent):
     def __init__(self, llm: BaseChatModel = None):
         super().__init__(name="query_decomposer", version="1.0.0")
         settings = get_settings()
-        self.llm = llm or create_qwen_chat_model(settings, temperature=0.0, max_tokens=1000)
+        self.llm = llm or create_qwen_chat_model(
+            settings,
+            model=settings.get_agent_model("decomposer"),
+            temperature=0.0,
+            max_tokens=1000,
+        )
     
     def execute(self, state: AgentState) -> AgentState:
         """

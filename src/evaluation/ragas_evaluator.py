@@ -1,6 +1,6 @@
 """
 RAGAS-based evaluation for RAG system.
-Override default OpenAI models with the project's DeepSeek-compatible LLM
+Override default OpenAI models with the project's OpenRouter LLM
 and BGE embedding model.
 """
 
@@ -58,13 +58,13 @@ class BGELargeEmbeddings(Embeddings):
 class RAGASEvaluator:
     """
     Evaluate RAG system using RAGAS framework.
-    Uses DeepSeek (LLM) + BGE-large (embeddings).
+    Uses OpenRouter (LLM) + BGE-large (embeddings).
     """
 
     def __init__(self, model: str = None):
         settings = get_settings()
         if not settings.anthropic_auth_token:
-            raise ValueError("ANTHROPIC_AUTH_TOKEN not found in .env")
+            raise ValueError("OPENROUTER_API_KEY not found in .env")
 
         model = model or settings.llm_model
         llm = create_chat_model(settings, model=model, temperature=0.0)
@@ -81,7 +81,7 @@ class RAGASEvaluator:
         ]
 
         print("📊 RAGAS Evaluator initialized")
-        print(f"   LLM: DeepSeek ({model})")
+        print(f"   LLM: OpenRouter ({model})")
         print(f"   Embeddings: BGE-large ({self.embeddings})")
         print(f"   Metrics: {len(self.metrics)}")
 
@@ -104,7 +104,7 @@ class RAGASEvaluator:
 
         dataset = Dataset.from_dict(data)
 
-        print("   Running RAGAS evaluation with DeepSeek + BGE-large...")
+        print("   Running RAGAS evaluation with OpenRouter + BGE-large...")
 
         # ← Pass BOTH llm and embeddings
         results = evaluate(

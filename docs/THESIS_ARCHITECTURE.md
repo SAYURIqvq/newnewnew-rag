@@ -35,7 +35,7 @@ flowchart TB
   end
 
   subgraph Models["Models"]
-    LLM[DeepSeek LLM]
+    LLM[OpenRouter LLM]
     EMB[BGE Embeddings]
   end
 

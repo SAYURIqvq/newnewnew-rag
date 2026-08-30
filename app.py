@@ -5,6 +5,9 @@ Phase 1 Day 10 - ChromaDB Persistent Storage
 
 import streamlit as st
 import os
+import re
+import json
+import shutil
 from pathlib import Path
 from datetime import datetime
 import numpy as np
@@ -92,13 +95,14 @@ st.markdown("""
 
 
 def _llm_api_key_ok() -> bool:
-    """True if a real DeepSeek / Anthropic-compatible API token is configured."""
+    """True if a real OpenRouter / OpenAI-compatible API token is configured."""
     from src.config import get_settings
 
     key = (get_settings().anthropic_auth_token or "").strip()
     if not key:
         return False
     placeholders = {
+        "your_openrouter_api_key_here",
         "your_deepseek_api_key_here",
         "your_dashscope_key_here",
         "changeme",
@@ -123,12 +127,199 @@ def _format_strategy_label(strategy) -> str:
     return text.replace("_", " ").title() if text else "N/A"
 
 
+def _clean_agentic_answer(answer: str, max_words: int = 300) -> str:
+    """Remove workflow narration and keep the final answer presentation-sized."""
+    import re
+
+    text = (answer or "").strip()
+    boilerplate = [
+        r"^Based on (?:the )?feedback,.*?\n\s*\n",
+        r"^Here is (?:an|the) improved answer.*?\n\s*\n",
+        r"^Based solely on the provided context,?\s*",
+    ]
+    for pattern in boilerplate:
+        text = re.sub(pattern, "", text, count=1, flags=re.IGNORECASE | re.DOTALL)
+
+    words = text.split()
+    if len(words) <= max_words:
+        return text
+
+    shortened = " ".join(words[:max_words])
+    sentence_end = max(
+        shortened.rfind("."),
+        shortened.rfind("!"),
+        shortened.rfind("?"),
+    )
+    if sentence_end >= int(len(shortened) * 0.65):
+        shortened = shortened[:sentence_end + 1]
+    else:
+        shortened = shortened.rstrip(",;:") + "."
+    return shortened
+
+
+SESSION_CACHE_PATH = Path("data/demo_session_cache.json")
+EVALUATION_CACHE_PATH = Path("data/evaluation_results_cache.json")
+
+
+def _json_cache_default(value):
+    """Convert common numeric/model values without losing metric types."""
+    if isinstance(value, np.generic):
+        return value.item()
+    if hasattr(value, "value"):
+        return value.value
+    return str(value)
+
+
+def _save_demo_cache() -> None:
+    """Persist user-visible demo state; runtime objects stay in memory/on disk."""
+    payload = {
+        "version": 1,
+        "documents": st.session_state.get("documents", []),
+        "comparison_results": st.session_state.get("comparison_results", {}),
+        "evaluation_results": st.session_state.get("evaluation_results"),
+        "chunking_mode": st.session_state.get("chunking_mode", "hierarchical"),
+        "workspace_documents": {
+            mode: resource.get("document_name")
+            for mode, resource in st.session_state.get("workspace_resources", {}).items()
+        },
+    }
+    SESSION_CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
+    temporary_path = SESSION_CACHE_PATH.with_suffix(".tmp")
+    temporary_path.write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2, default=_json_cache_default),
+        encoding="utf-8",
+    )
+    temporary_path.replace(SESSION_CACHE_PATH)
+
+
+def _save_evaluation_cache(evaluation_results: dict) -> None:
+    """Persist evaluation independently from workspace/session updates."""
+    EVALUATION_CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
+    temporary_path = EVALUATION_CACHE_PATH.with_suffix(".tmp")
+    temporary_path.write_text(
+        json.dumps(
+            evaluation_results,
+            ensure_ascii=False,
+            indent=2,
+            default=_json_cache_default,
+        ),
+        encoding="utf-8",
+    )
+    temporary_path.replace(EVALUATION_CACHE_PATH)
+
+
+def _clear_evaluation_cache() -> None:
+    st.session_state.evaluation_results = None
+    if EVALUATION_CACHE_PATH.exists():
+        EVALUATION_CACHE_PATH.unlink()
+
+
+def _restore_demo_cache() -> None:
+    """Restore cached results and reconnect persistent workspace indexes."""
+    if st.session_state.get("demo_cache_restored"):
+        return
+    st.session_state.demo_cache_restored = True
+    if not SESSION_CACHE_PATH.exists():
+        if EVALUATION_CACHE_PATH.exists():
+            st.session_state.evaluation_results = json.loads(
+                EVALUATION_CACHE_PATH.read_text(encoding="utf-8")
+            )
+            st.session_state.evaluation_results["restored"] = True
+        return
+    try:
+        cached = json.loads(SESSION_CACHE_PATH.read_text(encoding="utf-8"))
+        st.session_state.documents = cached.get("documents", [])
+        st.session_state.comparison_results = cached.get(
+            "comparison_results", {"baseline": None, "agentic": None}
+        )
+        st.session_state.evaluation_results = cached.get("evaluation_results")
+        if EVALUATION_CACHE_PATH.exists():
+            st.session_state.evaluation_results = json.loads(
+                EVALUATION_CACHE_PATH.read_text(encoding="utf-8")
+            )
+        if st.session_state.evaluation_results:
+            st.session_state.evaluation_results["restored"] = True
+        st.session_state.chunking_mode = "hierarchical"
+        for mode in ("baseline", "agentic"):
+            index_path = Path(f"data/chroma_db_{mode}")
+            document_name = cached.get("workspace_documents", {}).get(mode)
+            if not document_name or not index_path.exists():
+                continue
+            store = ChromaVectorStore(persist_directory=str(index_path))
+            if store.get_stats().get("total_vectors", 0) < 1:
+                continue
+            resource = st.session_state.workspace_resources[mode]
+            resource.update({
+                "vector_store": store,
+                "document_name": document_name,
+                "ready": True,
+            })
+            if mode == "agentic" and GRAPH_AVAILABLE:
+                graph_path = Path("data/graphs") / f"agentic_{document_name}_graph.pkl"
+                if graph_path.exists():
+                    graph = KnowledgeGraph()
+                    graph.load(str(graph_path))
+                    resource["knowledge_graph"] = graph
+        ready_resource = next(
+            (resource for resource in st.session_state.workspace_resources.values()
+             if resource.get("ready")),
+            None,
+        )
+        if ready_resource:
+            st.session_state.vector_store = ready_resource["vector_store"]
+            st.session_state.knowledge_graph = ready_resource.get("knowledge_graph")
+            st.session_state.rag_initialized = True
+    except Exception as exc:
+        print(f"Could not restore demo cache: {exc}")
+
+
+def _clear_demo_state() -> None:
+    """Clear cached UI results and both persistent workspaces."""
+    for mode in ("baseline", "agentic"):
+        resource = st.session_state.workspace_resources[mode]
+        store = resource.get("vector_store")
+        if store:
+            try:
+                store.clear_all()
+            except Exception:
+                pass
+        shutil.rmtree(Path(f"data/chroma_db_{mode}"), ignore_errors=True)
+        resource.update({
+            "vector_store": None,
+            "knowledge_graph": None,
+            "parent_chunks": [],
+            "child_chunks": [],
+            "document_name": None,
+            "ready": False,
+        })
+    shutil.rmtree(Path("data/graphs"), ignore_errors=True)
+    if SESSION_CACHE_PATH.exists():
+        SESSION_CACHE_PATH.unlink()
+    if EVALUATION_CACHE_PATH.exists():
+        EVALUATION_CACHE_PATH.unlink()
+    st.session_state.documents = []
+    st.session_state.messages = []
+    st.session_state.comparison_results = {"baseline": None, "agentic": None}
+    st.session_state.evaluation_results = None
+    st.session_state.comparison_requested = False
+    st.session_state.vector_store = None
+    st.session_state.knowledge_graph = None
+    st.session_state.parent_chunks = []
+    st.session_state.child_chunks = []
+    st.session_state.rag_initialized = False
+    st.session_state.uploader_generation = st.session_state.get(
+        "uploader_generation", 0
+    ) + 1
+
+
 def init_session_state():
     """Initialize session state variables."""
     
     # Chat messages
     if 'messages' not in st.session_state:
         st.session_state.messages = []
+    if 'uploader_generation' not in st.session_state:
+        st.session_state.uploader_generation = 0
     
     # Documents
     if 'documents' not in st.session_state:
@@ -146,9 +337,8 @@ def init_session_state():
     if 'processing' not in st.session_state:
         st.session_state.processing = False
     
-    # Chunking mode selection ← NEW
-    if 'chunking_mode' not in st.session_state:
-        st.session_state.chunking_mode = 'hierarchical'  # 'flat' or 'hierarchical'
+    # The thesis specifies parent-child chunking as the system configuration.
+    st.session_state.chunking_mode = 'hierarchical'
     
     # RAG components - FORCE REINITIALIZE
     if 'embedder' not in st.session_state or not hasattr(st.session_state.embedder, 'generate'):
@@ -163,10 +353,96 @@ def init_session_state():
     if 'rag_mode' not in st.session_state:
         st.session_state.rag_mode = 'agentic'
 
+    # Side-by-side comparison workspace
+    if 'comparison_results' not in st.session_state:
+        st.session_state.comparison_results = {
+            'baseline': None,
+            'agentic': None,
+        }
+    if 'comparison_requested' not in st.session_state:
+        st.session_state.comparison_requested = False
+    if 'evaluation_results' not in st.session_state:
+        st.session_state.evaluation_results = None
+
+    if 'workspace_resources' not in st.session_state:
+        st.session_state.workspace_resources = {
+            'baseline': {
+                'vector_store': None,
+                'knowledge_graph': None,
+                'parent_chunks': [],
+                'child_chunks': [],
+                'document_name': None,
+                'ready': False,
+            },
+            'agentic': {
+                'vector_store': None,
+                'knowledge_graph': None,
+                'parent_chunks': [],
+                'child_chunks': [],
+                'document_name': None,
+                'ready': False,
+            },
+        }
+
+    if 'workspace_jobs' not in st.session_state:
+        st.session_state.workspace_jobs = {
+            'baseline': None,
+            'agentic': None,
+        }
+
+    if 'workspace_executor' not in st.session_state:
+        from concurrent.futures import ThreadPoolExecutor
+
+        st.session_state.workspace_executor = ThreadPoolExecutor(
+            max_workers=2,
+            thread_name_prefix="rag-workspace",
+        )
+
+    _restore_demo_cache()
+
+    # Remove stale entries created by the former automatic-index fallback.
+    if any(
+        doc.get("name") == "Preloaded ChromaDB index"
+        for doc in st.session_state.documents
+    ):
+        if st.session_state.get("vector_store"):
+            try:
+                st.session_state.vector_store.clear_all()
+            except Exception as e:
+                print(f"Could not clear stale preloaded index: {e}")
+        st.session_state.documents = []
+        st.session_state.vector_store = None
+        st.session_state.knowledge_graph = None
+        st.session_state.parent_chunks = []
+        st.session_state.child_chunks = []
+        st.session_state.rag_initialized = False
+        st.session_state.comparison_results = {
+            'baseline': None,
+            'agentic': None,
+        }
+        for workspace in st.session_state.workspace_resources.values():
+            store = workspace.get('vector_store')
+            if store:
+                try:
+                    store.clear_all()
+                except Exception:
+                    pass
+            workspace.update({
+                'vector_store': None,
+                'knowledge_graph': None,
+                'parent_chunks': [],
+                'child_chunks': [],
+                'document_name': None,
+                'ready': False,
+            })
+
 def display_header():
     """Display app header."""
-    mode_short = _rag_mode_short()
-    query_count = len([m for m in st.session_state.messages if m["role"] == "user"])
+    query_count = sum(
+        1
+        for result in st.session_state.comparison_results.values()
+        if result and (result.get("message") or {}).get("content")
+    )
 
     col1, col2, col3, col4 = st.columns([3.2, 1, 1, 1.2])
 
@@ -185,9 +461,9 @@ def display_header():
     with col3:
         st.metric("Queries", query_count)
     with col4:
-        st.markdown("**Mode**")
+        st.markdown("**Workspaces**")
         st.markdown(
-            f'<span class="mode-pill">{mode_short}</span>',
+            '<span class="mode-pill">2</span>',
             unsafe_allow_html=True,
         )
 
@@ -197,84 +473,37 @@ def sidebar():
     
     with st.sidebar:
         st.markdown("### Documents & Settings")
-        
-        # ============================================
-        # CHUNKING MODE SELECTOR (NEW)
-        # ============================================
         st.markdown("**Chunking**")
-        chunking_mode = st.radio(
-            "Select chunking strategy",
-            options=['hierarchical', 'flat'],
-            format_func=lambda x: {
-                'hierarchical': '🔺 Hierarchical (Parent-Child)',
-                'flat': '📊 Flat (Single Level)'
-            }[x],
-            help="""
-            **Hierarchical**: Better context, higher accuracy (recommended)
-            **Flat**: Simpler, faster processing
-            """,
-            key='chunking_mode_selector'
-        )
-        
-        st.session_state.chunking_mode = chunking_mode
-        
-        # Show mode info
-        if chunking_mode == 'hierarchical':
-            st.info("📈 Parents: 2000 tokens | Children: 500 tokens")
-        else:
-            st.info("📊 Chunks: 500 tokens")
+        st.caption("Hierarchical (Parent-Child)")
+        st.info("📈 Parents: 2000 tokens | Children: 500 tokens")
         
         st.divider()
 
         # ============================================
-        # RAG MODE (Baseline vs Agentic — thesis demo)
-        # ============================================
-        st.markdown("**Comparison**")
-        st.selectbox(
-            "RAG pipeline",
-            options=["agentic", "baseline"],
-            format_func=lambda x: {
-                "agentic": "Agentic RAG (proposed)",
-                "baseline": "Baseline (naive RAG)",
-            }[x],
-            label_visibility="collapsed",
-            key="rag_mode",
-        )
-        
-        st.divider()
-        
-        # ============================================
         # FILE UPLOADER (EXISTING - KEPT)
         # ============================================
-        st.markdown("**Upload**")
+        st.markdown("**Select document**")
         
         uploaded_file = st.file_uploader(
             "Choose a file",
             type=['pdf', 'docx', 'txt'],
             help="Upload PDF, Word (DOCX), or Text (TXT) files",
-            label_visibility="collapsed"
+            label_visibility="collapsed",
+            key=f"document_uploader_{st.session_state.uploader_generation}",
         )
         
         # Show file info if uploaded
         if uploaded_file is not None:
             file_size = uploaded_file.size / 1024  # KB
-            file_type = uploaded_file.type
+            file_type = Path(uploaded_file.name).suffix.upper().lstrip(".")
+            st.caption(f"Selected: {uploaded_file.name} | {file_type} | {file_size:.1f} KB")
             
-            st.info(f"""
-            📄 **{uploaded_file.name}**
-            - Type: {file_type}
-            - Size: {file_size:.1f} KB
-            """)
-            
-            if st.button("Process document", type="primary"):
-                process_uploaded_file(uploaded_file)
-        
         st.divider()
         
         # ============================================
         # DOCUMENT LIST (UPDATED WITH HIERARCHICAL INFO)
         # ============================================
-        st.markdown("**Uploaded files**")
+        st.markdown("**Indexed document**")
         
         if st.session_state.documents:
             for i, doc in enumerate(st.session_state.documents):
@@ -319,53 +548,6 @@ def sidebar():
         st.divider()
         
         # ============================================
-        # KNOWLEDGE GRAPH STATS (NEW - WEEK 9)
-        # ============================================
-        if st.session_state.knowledge_graph:
-            st.subheader("🕸️ Knowledge Graph")
-            
-            kg = st.session_state.knowledge_graph
-            
-            # Metrics
-            col1, col2 = st.columns(2)
-            with col1:
-                st.metric("Nodes", kg.graph.number_of_nodes())
-            with col2:
-                st.metric("Edges", kg.graph.number_of_edges())
-            
-            # Top entities
-            if kg.graph.number_of_nodes() > 0:
-                st.markdown("**Top Entities:**")
-                top_entities = kg.get_top_entities(n=5, metric='degree')
-                for entity, degree in top_entities:
-                    st.text(f"• {entity[:20]}: {int(degree)}")
-
-        st.divider()
-
-        # ============================================
-        # SAMPLE QUESTIONS (EXISTING - KEPT)
-        # ============================================
-        if st.session_state.documents:
-            st.markdown("**Sample questions**")
-            
-            sample_questions = [
-                "What is this document about?",
-                "Summarize the main points",
-                "What are the key findings?",
-                "Give me specific details"
-            ]
-            
-            for question in sample_questions:
-                if st.button(f"💬 {question}", key=f"sample_{question}"):
-                    st.session_state.sample_query = question
-                    try:
-                        st.rerun()
-                    except AttributeError:
-                        st.experimental_rerun()
-        
-        st.divider()
-        
-        # ============================================
         # EXPORT CHAT (EXISTING - KEPT)
         # ============================================
         if st.session_state.messages:
@@ -377,7 +559,7 @@ def sidebar():
         st.divider()
         
         if not _llm_api_key_ok():
-            st.error("Set ANTHROPIC_AUTH_TOKEN in `.env` and refresh.")
+            st.error("Set OPENROUTER_API_KEY in `.env` and refresh.")
             st.divider()
 
         st.markdown("**Status**")
@@ -392,35 +574,19 @@ def sidebar():
         else:
             st.warning("Upload a document to begin")
         
-        # Clear chat button
-        if st.button("Clear chat"):
-            st.session_state.messages = []
-            try:
+        st.divider()
+        with st.expander("Reset demo", expanded=False):
+            st.caption("Clears documents, indexes, answers, graphs, and cached evaluation results.")
+            if st.button(
+                "Clear and Start Over",
+                use_container_width=True,
+                type="secondary",
+                key="clear_complete_demo",
+            ):
+                _clear_demo_state()
                 st.rerun()
-            except AttributeError:
-                st.experimental_rerun()
-        
-        # Clear database button (NEW - CAREFUL!)
-        if st.session_state.rag_initialized:
-            st.divider()
-            
-            with st.expander("⚠️ Advanced Options"):
-                st.warning("**Danger Zone**")
-                
-                if st.button("🗑️ Clear Vector Database", type="secondary"):
-                    if st.button("⚠️ Confirm Clear All Vectors?"):
-                        try:
-                            st.session_state.vector_store.clear_all()
-                            st.session_state.documents = []
-                            st.session_state.parent_chunks = []
-                            st.session_state.child_chunks = []
-                            st.success("✅ Database cleared")
-                            try:
-                                st.rerun()
-                            except AttributeError:
-                                st.experimental_rerun()
-                        except Exception as e:
-                            st.error(f"Error: {e}")
+
+    return uploaded_file
 
 def export_chat_history():
     """Export chat history as text file."""
@@ -449,11 +615,18 @@ def export_chat_history():
         mime="text/plain"
     )
 
-def process_uploaded_file(uploaded_file):
+def process_uploaded_file(uploaded_file, processing_rag_mode=None):
     """Process uploaded document with ChromaDB persistent storage."""
     
     try:
         st.session_state.processing = True
+        processing_rag_mode = (
+            processing_rag_mode
+            or st.session_state.get("rag_mode", "agentic")
+        )
+        workspace = st.session_state.workspace_resources[processing_rag_mode]
+        workspace['ready'] = False
+        st.session_state.comparison_results[processing_rag_mode] = None
 
         # Create upload directory
         upload_dir = Path("data/uploads")
@@ -466,46 +639,25 @@ def process_uploaded_file(uploaded_file):
         
         file_ext = file_path.suffix.upper()
         
-        # ========== FORCE CLEAN REINIT ==========
-        # Reuse cached embedder while resetting document/index state.
-        st.session_state.embedder = get_cached_embedder()
-        
+        # Each workspace owns a separate persistent vector index.
+        embedder = get_cached_embedder()
         from src.storage.chroma_store import ChromaVectorStore
-        
-        # Clear if exists
-        if st.session_state.get('vector_store'):
-            st.session_state.vector_store.clear_all()
-            print("🗑️ Cleared old ChromaDB data")
-        
-        # Fresh vector store
-        st.session_state.vector_store = ChromaVectorStore(
-            persist_directory="data/chroma_db"
+        vector_store = ChromaVectorStore(
+            persist_directory=f"data/chroma_db_{processing_rag_mode}"
         )
-        
-        st.session_state.documents = []
-        st.session_state.messages = []
-        st.session_state.rag_initialized = True
-        print("✅ Reinitialized with clean state")
-        # ========== END REINIT ==========
+        vector_store.clear_all()
+        print(f"🗑️ Cleared {processing_rag_mode} workspace index")
         
         # Progress bar
         progress_bar = st.progress(0)
         status_text = st.empty()
         
         # Step 1: Initialize - USE CHROMADB ← UPDATED
-        status_text.text("🔧 Initializing RAG components...")
+        if processing_rag_mode == "baseline":
+            status_text.text("🔧 Initializing Baseline vector RAG...")
+        else:
+            status_text.text("🔧 Initializing Agentic RAG components...")
         progress_bar.progress(10)
-        
-        if not st.session_state.rag_initialized:
-            st.session_state.embedder = get_cached_embedder()
-            
-            # Use ChromaDB instead of in-memory ← CHANGED
-            from src.storage.chroma_store import ChromaVectorStore
-            st.session_state.vector_store = ChromaVectorStore(
-                persist_directory="data/chroma_db"
-            )
-            
-            st.session_state.rag_initialized = True
         
         # Step 2: Load document
         status_text.text(f"📄 Loading {file_ext} file...")
@@ -574,93 +726,83 @@ def process_uploaded_file(uploaded_file):
         # Embed parents
         if parent_chunks:
             for parent in parent_chunks:
-                parent.embedding = st.session_state.embedder.generate([parent.text])[0]
+                parent.embedding = embedder.generate([parent.text])[0]
         
         # Embed children
         for child in child_chunks:
-            child.embedding = st.session_state.embedder.generate([child.text])[0]
+            child.embedding = embedder.generate([child.text])[0]
 
-        # ========== NEW: BUILD KNOWLEDGE GRAPH ==========
-        status_text.text("🔨 Building knowledge graph...")
+        # ========== OPTIONAL AGENTIC KNOWLEDGE GRAPH ==========
+        if processing_rag_mode == "baseline":
+            status_text.text("📊 Preparing Baseline vector index...")
+        else:
+            status_text.text("🔨 Building Agentic knowledge graph...")
         progress_bar.progress(75)
 
-        try:
-            from src.graph.entity_extractor import EntityExtractor
-            from src.graph.relationship_extractor import RelationshipExtractor
-            from src.graph.graph_builder import KnowledgeGraph
-            
-            print("🔨 Extracting entities and relationships...")
-            
-            # Initialize extractors
-            entity_extractor = EntityExtractor()
-            rel_extractor = RelationshipExtractor()
-            
-            # Extract from child chunks (more granular)
-            chunk_entities = {}
-            chunk_relationships = {}
-            
-            for i, chunk in enumerate(child_chunks):
-                # Extract entities
-                entities = entity_extractor.extract(chunk.text)
-                chunk_entities[chunk.chunk_id] = entities
-                
-                # Extract relationships
-                if len(entities) >= 2:
-                    rels = rel_extractor.extract_from_sentence(chunk.text, entities)
-                    chunk_relationships[chunk.chunk_id] = rels
-                else:
-                    chunk_relationships[chunk.chunk_id] = []
-                
-                # Progress indicator
-                if (i + 1) % 10 == 0:
-                    print(f"   Processed {i+1}/{len(child_chunks)} chunks")
-            
-            # Build knowledge graph
-            print("🔨 Building knowledge graph structure...")
-            kg = KnowledgeGraph()
-            kg.build_from_chunks(child_chunks, chunk_entities, chunk_relationships)
-            
-            # Save graph
-            graph_path = f"data/graphs/{uploaded_file.name}_graph.pkl"
-            kg.save(graph_path)
-            
-            # Store in session state
-            st.session_state.knowledge_graph = kg
-            
-            print(f"✅ Knowledge graph built: {kg}")
-            
-        except Exception as e:
-            print(f"⚠️  Graph building failed: {e}")
-            import traceback
-            traceback.print_exc()
-            # Don't fail entire upload if graph fails
-            st.session_state.knowledge_graph = None
+        if processing_rag_mode == "agentic":
+            try:
+                from src.graph.entity_extractor import EntityExtractor
+                from src.graph.relationship_extractor import RelationshipExtractor
+                from src.graph.graph_builder import KnowledgeGraph
+
+                print("🔨 Extracting entities and relationships...")
+                entity_extractor = EntityExtractor()
+                rel_extractor = RelationshipExtractor()
+                chunk_entities = {}
+                chunk_relationships = {}
+
+                for i, chunk in enumerate(child_chunks):
+                    entities = entity_extractor.extract(chunk.text)
+                    chunk_entities[chunk.chunk_id] = entities
+                    if len(entities) >= 2:
+                        rels = rel_extractor.extract_from_sentence(chunk.text, entities)
+                        chunk_relationships[chunk.chunk_id] = rels
+                    else:
+                        chunk_relationships[chunk.chunk_id] = []
+                    if (i + 1) % 10 == 0:
+                        print(f"   Processed {i+1}/{len(child_chunks)} chunks")
+
+                print("🔨 Building knowledge graph structure...")
+                kg = KnowledgeGraph()
+                kg.build_from_chunks(child_chunks, chunk_entities, chunk_relationships)
+                graph_path = f"data/graphs/{uploaded_file.name}_graph.pkl"
+                kg.save(graph_path)
+                knowledge_graph = kg
+                print(f"✅ Knowledge graph built: {kg}")
+
+            except Exception as e:
+                print(f"⚠️  Graph building failed: {e}")
+                import traceback
+                traceback.print_exc()
+                knowledge_graph = None
+        else:
+            knowledge_graph = None
 
         # ========== END GRAPH BUILDING ==========
 
 
         # Step 5: Store
-        status_text.text("💾 Storing in vector database...")
+        if processing_rag_mode == "baseline":
+            status_text.text("💾 Storing Baseline vector index...")
+        else:
+            status_text.text("💾 Storing Agentic retrieval indexes...")
         progress_bar.progress(85)
         
         if st.session_state.chunking_mode == 'hierarchical':
-            st.session_state.vector_store.add_chunks(
+            vector_store.add_chunks(
                 parent_chunks=parent_chunks,
                 child_chunks=child_chunks,
                 filename=uploaded_file.name  # ← ADD THIS LINE
             )
-            # Store for UI display
-            st.session_state.parent_chunks.extend(parent_chunks)
-            st.session_state.child_chunks.extend(child_chunks)
         else:
             # For flat mode, use old add_chunks method
             for chunk in child_chunks:
-                st.session_state.vector_store.chunks.append(chunk)
+                vector_store.chunks.append(chunk)
         
         # Step 6: Complete
         page_count = loader.count_pages(str(file_path))
         
-        st.session_state.documents.append({
+        document_record = {
             'name': uploaded_file.name,
             'path': str(file_path),
             'type': file_ext,
@@ -669,12 +811,34 @@ def process_uploaded_file(uploaded_file):
             'parents': len(parent_chunks) if parent_chunks else 0,
             'chunking_mode': st.session_state.chunking_mode,
             'uploaded_at': datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        }
+        st.session_state.documents = [document_record]
+
+        workspace.update({
+            'vector_store': vector_store,
+            'knowledge_graph': knowledge_graph,
+            'parent_chunks': parent_chunks,
+            'child_chunks': child_chunks,
+            'document_name': uploaded_file.name,
+            'ready': True,
         })
+
+        # Keep legacy views working with the most recently prepared workspace.
+        st.session_state.vector_store = vector_store
+        st.session_state.knowledge_graph = knowledge_graph
+        st.session_state.parent_chunks = parent_chunks
+        st.session_state.child_chunks = child_chunks
+        st.session_state.embedder = embedder
+        st.session_state.rag_initialized = True
         
         progress_bar.progress(100)
         status_text.text("✅ Processing complete!")
         
-        st.success(f"✅ {file_ext}: {uploaded_file.name} | Mode: {st.session_state.chunking_mode.upper()}")
+        st.success(
+            f"✅ {file_ext}: {uploaded_file.name} | "
+            f"Workspace: {processing_rag_mode.upper()} | "
+            f"Chunking: {st.session_state.chunking_mode.upper()}"
+        )
         st.balloons()
         
         st.session_state.processing = False
@@ -699,12 +863,36 @@ def delete_document(index):
     try:
         doc = st.session_state.documents[index]
         
-        # Delete file if exists
-        if os.path.exists(doc['path']):
-            os.remove(doc['path'])
+        # Local preloaded-index entries do not have a source file path.
+        doc_path = doc.get('path')
+        if doc_path and os.path.exists(doc_path):
+            os.remove(doc_path)
         
         # Remove from list
         st.session_state.documents.pop(index)
+
+        if not st.session_state.documents:
+            for workspace in st.session_state.workspace_resources.values():
+                store = workspace.get('vector_store')
+                if store:
+                    store.clear_all()
+                workspace.update({
+                    'vector_store': None,
+                    'knowledge_graph': None,
+                    'parent_chunks': [],
+                    'child_chunks': [],
+                    'document_name': None,
+                    'ready': False,
+                })
+            st.session_state.vector_store = None
+            st.session_state.knowledge_graph = None
+            st.session_state.parent_chunks = []
+            st.session_state.child_chunks = []
+            st.session_state.rag_initialized = False
+            st.session_state.comparison_results = {
+                'baseline': None,
+                'agentic': None,
+            }
         
         st.success(f"Deleted: {doc['name']}")
         
@@ -777,6 +965,7 @@ def _append_assistant_response(
     rag_mode: str,
     workflow_metadata: dict,
     strategy_label: str,
+    record_in_chat: bool = True,
 ):
     """Shared: citations, chat message, performance tracking."""
     import time
@@ -793,14 +982,19 @@ def _append_assistant_response(
             "score": chunk.score or 0.0,
         })
 
-    st.session_state.messages.append({
+    latency = time.time() - start_time
+    workflow_metadata = {
+        **workflow_metadata,
+        "latency_seconds": latency,
+    }
+    assistant_message = {
         "role": "assistant",
         "content": result.answer or "No answer generated. Check document index and API settings.",
         "citations": citations,
         "workflow_metadata": workflow_metadata,
-    })
-
-    latency = time.time() - start_time
+    }
+    if record_in_chat:
+        st.session_state.messages.append(assistant_message)
 
     if "performance_tracker" not in st.session_state:
         from src.monitoring.performance_tracker import PerformanceTracker
@@ -817,10 +1011,15 @@ def _append_assistant_response(
 
     print(f"⏱️  Total latency: {latency:.2f}s | mode={rag_mode}")
     print("=" * 60 + "\n")
+    return assistant_message
 
 
-def process_user_query(query: str):
-    """Process user query (Baseline or Agentic, per sidebar selection)."""
+def process_user_query(
+    query: str,
+    record_in_chat: bool = True,
+    rag_mode_override: str | None = None,
+):
+    """Process a query in the selected or explicitly requested workflow."""
     import time
     start_time = time.time()
     
@@ -836,42 +1035,49 @@ def process_user_query(query: str):
     from src.config import get_settings
     from src.llm.chat_model import create_chat_model
     
-    rag_mode = st.session_state.get("rag_mode", "agentic")
+    rag_mode = rag_mode_override or st.session_state.get("rag_mode", "agentic")
+    workspace = st.session_state.workspace_resources.get(rag_mode, {})
+    vector_store = workspace.get("vector_store")
+    knowledge_graph = workspace.get("knowledge_graph")
 
     print("\n" + "="*60)
     print(f"🔍 Processing query: {query}")
     print(f"   Mode: {rag_mode}")
     print("="*60)
     
-    if not st.session_state.rag_initialized:
-        st.error("Please upload a document first!")
+    if not workspace.get("ready") or not vector_store:
+        st.error(f"Process the document in the {rag_mode.title()} workspace first.")
         return
 
     if not _llm_api_key_ok():
         st.error(
-            "Set a valid ANTHROPIC_AUTH_TOKEN (DeepSeek API key) in `.env`, then refresh and try again."
+            "Set a valid OPENROUTER_API_KEY in `.env`, then refresh and try again."
         )
         return
     
     # Add user message
-    st.session_state.messages.append({
-        "role": "user",
-        "content": query
-    })
+    if record_in_chat:
+        st.session_state.messages.append({
+            "role": "user",
+            "content": query
+        })
 
     # ========== BASELINE (Naive RAG) ==========
     if rag_mode == "baseline":
         from src.baselines.naive_rag import NaiveRAG
 
-        if not st.session_state.vector_store:
-            st.error("Vector store not initialized. Please re-upload your document.")
-            return
-
         with st.spinner("📊 Running Baseline (Naive RAG)..."):
             try:
+                settings = get_settings()
+                baseline_llm = create_chat_model(
+                    settings,
+                    model=settings.get_agent_model("writer"),
+                    max_tokens=320,
+                )
                 naive = NaiveRAG(
-                    vector_store=st.session_state.vector_store,
+                    vector_store=vector_store,
                     embedder=st.session_state.embedder,
+                    writer=WriterAgent(llm=baseline_llm),
                 )
                 result = naive.run(query)
             except Exception as e:
@@ -881,7 +1087,7 @@ def process_user_query(query: str):
                 st.error(f"Error: {e}")
                 return
 
-        _append_assistant_response(
+        return _append_assistant_response(
             query=query,
             result=result,
             start_time=start_time,
@@ -892,17 +1098,31 @@ def process_user_query(query: str):
                 "chunks_used": len(result.chunks),
             },
             strategy_label="naive_baseline",
+            record_in_chat=record_in_chat,
         )
-        return
     
     # ========== INITIALIZE AGENTS (Agentic) ==========
     with st.spinner("⚙️ Initializing Agentic workflow..."):
         settings = get_settings()
-        llm = create_chat_model(settings)
+        planner_llm = create_chat_model(settings, model=settings.get_agent_model("planner"), max_tokens=220)
+        decomposer_llm = create_chat_model(settings, model=settings.get_agent_model("decomposer"), max_tokens=260)
+        validator_llm = create_chat_model(settings, model=settings.get_agent_model("validator"), max_tokens=220)
+        writer_llm = create_chat_model(
+            settings,
+            model=settings.get_agent_model("writer"),
+            max_tokens=320,
+            reasoning_effort="none",
+        )
+        critic_llm = create_chat_model(
+            settings,
+            model=settings.get_agent_model("critic"),
+            max_tokens=300,
+            reasoning_effort="none",
+        )
         
         # Initialize all agents
-        planner = PlannerAgent(llm=llm)
-        decomposer = QueryDecomposer()
+        planner = PlannerAgent(llm=planner_llm)
+        decomposer = QueryDecomposer(llm=decomposer_llm)
         
         # Retrieval coordinator needs swarm agents
         from src.retrieval.vector_search import VectorSearchAgent
@@ -910,18 +1130,18 @@ def process_user_query(query: str):
         from src.retrieval.graph_search import GraphSearchAgent
         
         vector_agent = VectorSearchAgent(
-            vector_store=st.session_state.vector_store,
+            vector_store=vector_store,
             embedder=st.session_state.embedder
         )
         
         keyword_agent = KeywordSearchAgent(
-            vector_store=st.session_state.vector_store
+            vector_store=vector_store
         )
         
         graph_agent = GraphSearchAgent(
-            knowledge_graph=st.session_state.knowledge_graph,
-            vector_store=st.session_state.vector_store
-        ) if st.session_state.knowledge_graph else None
+            knowledge_graph=knowledge_graph,
+            vector_store=vector_store
+        ) if knowledge_graph else None
         
         coordinator = RetrievalCoordinator(
             vector_agent=vector_agent,
@@ -929,10 +1149,14 @@ def process_user_query(query: str):
             graph_agent=graph_agent
         )
         
-        validator = ValidatorAgent(llm=llm)
+        validator = ValidatorAgent(llm=validator_llm)
         synthesis = SynthesisAgent()
-        writer = WriterAgent(llm=llm)
-        critic = CriticAgent(llm=llm, quality_threshold=0.7)
+        writer = WriterAgent(llm=writer_llm)
+        critic = CriticAgent(
+            llm=critic_llm,
+            quality_threshold=0.7,
+            max_iterations=1,
+        )
         
         # Create complete workflow
         workflow = CompleteAgenticRAGWorkflow(
@@ -952,6 +1176,7 @@ def process_user_query(query: str):
         try:
             # Single workflow call!
             result = workflow.run(query)
+            result.answer = _clean_agentic_answer(result.answer, max_words=260)
             
             print(f"✅ Workflow complete!")
             print(f"   Strategy: {result.strategy}")
@@ -978,12 +1203,15 @@ def process_user_query(query: str):
             traceback.print_exc()
             err_msg = f"Generation failed: {e}"
             st.error(err_msg)
-            st.session_state.messages.append({
+            error_message = {
                 "role": "assistant",
                 "content": f"**Error:** {err_msg}\n\nTry **Baseline** mode or refresh the page.",
                 "workflow_metadata": {"rag_mode": "agentic", "error": str(e)},
-            })
-            return
+                "citations": [],
+            }
+            if record_in_chat:
+                st.session_state.messages.append(error_message)
+            return error_message
     
     # ========== PREPARE RESPONSE ==========
     strategy_val = (
@@ -997,7 +1225,7 @@ def process_user_query(query: str):
         else None
     )
 
-    _append_assistant_response(
+    return _append_assistant_response(
         query=query,
         result=result,
         start_time=start_time,
@@ -1009,22 +1237,603 @@ def process_user_query(query: str):
             "retrieval_rounds": result.retrieval_round,
             "validation_score": result.validation_score,
             "critic_score": result.critic_score,
+            "initial_critic_score": result.metadata.get("initial_critic_score"),
             "regenerations": result.metadata.get("regeneration_count", 0),
             "decision": critic_decision,
         },
         strategy_label=strategy_val,
+        record_in_chat=record_in_chat,
     )
+
+
+def _run_workspace_query(mode: str, query: str):
+    """Run one mode without changing the selected single-chat workspace."""
+    return process_user_query(
+        query,
+        record_in_chat=False,
+        rag_mode_override=mode,
+    )
+
+
+def _store_comparison_result(mode: str, query: str, message):
+    st.session_state.comparison_results[mode] = {
+        "query": query,
+        "message": message,
+    }
+    st.session_state.comparison_requested = False
+    _save_demo_cache()
+
+
+def _display_workspace_result(mode: str):
+    saved = st.session_state.comparison_results.get(mode)
+    if not saved:
+        st.info("No result yet. Run both workflows or use this workspace only.")
+        return
+
+    message = saved.get("message") or {}
+    metadata = message.get("workflow_metadata", {})
+    citations = message.get("citations", [])
+    latency = metadata.get("latency_seconds")
+    metric_a, metric_b, metric_c = st.columns(3)
+    with metric_a:
+        st.metric("Latency", f"{latency:.2f}s" if latency is not None else "N/A")
+    with metric_b:
+        st.metric("Sources", len(citations))
+    with metric_c:
+        if mode == "baseline":
+            st.metric("Strategy", "Vector only")
+        else:
+            st.metric("Strategy", _format_strategy_label(metadata.get("strategy")))
+
+    if mode == "agentic":
+        detail_a, detail_b, detail_c, detail_d = st.columns(4)
+        with detail_a:
+            validation = metadata.get("validation_score")
+            st.metric("Validation", f"{validation:.2f}" if validation is not None else "N/A")
+        with detail_b:
+            initial_critic = metadata.get("initial_critic_score")
+            st.metric(
+                "Initial critic",
+                f"{initial_critic:.2f}" if initial_critic is not None else "N/A",
+            )
+        with detail_c:
+            critic = metadata.get("critic_score")
+            st.metric("Final critic", f"{critic:.2f}" if critic is not None else "N/A")
+        with detail_d:
+            st.metric("Retrieval rounds", metadata.get("retrieval_rounds", "N/A"))
+
+    with st.expander("View question and full answer", expanded=False):
+        st.markdown("**Question**")
+        st.caption(saved.get("query", ""))
+        st.markdown("**Answer**")
+        st.markdown(message.get("content", "No answer generated."))
+
+    if citations:
+        with st.expander(f"View sources ({len(citations)})"):
+            for citation in citations:
+                source_number = citation.get("source_number", "-")
+                filename = citation.get("filename", "unknown")
+                chunk_type = citation.get("chunk_type", "unknown")
+                score = citation.get("score", 0.0)
+                st.caption(
+                    f"[{source_number}] {filename} | {chunk_type} chunk | "
+                    f"retrieval score {score:.2f}"
+                )
+                retrieval_source = citation.get("retrieval_source")
+                if retrieval_source:
+                    st.caption(f"Retrieval channel: {retrieval_source}")
+                graph_paths = citation.get("graph_paths", [])
+                if graph_paths:
+                    st.caption("Graph reasoning paths")
+                    for path in graph_paths[:3]:
+                        st.code(path.get("description", ""), language="text")
+                st.text(citation.get("text_preview", ""))
+
+
+def display_knowledge_graph_summary():
+    """Show Agentic graph status inside its owning workspace."""
+    kg = st.session_state.workspace_resources["agentic"].get("knowledge_graph")
+    if not kg:
+        st.info(
+            "Click **Process Document for Agentic** to build the knowledge graph."
+        )
+        return
+
+    st.markdown("**Knowledge Graph**")
+    node_col, edge_col = st.columns(2)
+    with node_col:
+        st.metric("Nodes", kg.graph.number_of_nodes())
+    with edge_col:
+        st.metric("Edges", kg.graph.number_of_edges())
+
+    if kg.graph.number_of_nodes() > 0:
+        top_entities = kg.get_top_entities(n=5, metric="degree")
+        st.caption(
+            "Top entities: "
+            + ", ".join(f"{entity}: {int(degree)}" for entity, degree in top_entities)
+        )
+
+
+def _comparison_metrics(mode: str) -> dict:
+    saved = st.session_state.comparison_results.get(mode) or {}
+    message = saved.get("message") or {}
+    metadata = message.get("workflow_metadata", {})
+    citations = message.get("citations", [])
+    answer = message.get("content", "")
+    cited_numbers = [int(value) for value in re.findall(r"\[(\d+)\]", answer)]
+    invalid_citations = sorted({
+        value for value in cited_numbers if value < 1 or value > len(citations)
+    })
+    latency = metadata.get("latency_seconds") or 0.0
+    words = len(answer.split())
+    rounds = metadata.get("retrieval_rounds", 1 if mode == "baseline" else 0)
+    return {
+        "question": saved.get("query", ""),
+        "latency": latency,
+        "sources": len(citations),
+        "words": words,
+        "strategy": (
+            "Vector only"
+            if mode == "baseline"
+            else _format_strategy_label(metadata.get("strategy"))
+        ),
+        "validation": metadata.get("validation_score"),
+        "critic": metadata.get("critic_score"),
+        "rounds": rounds,
+        "invalid_citations": invalid_citations,
+        "citation_integrity": 100 if cited_numbers and not invalid_citations else 0,
+    }
+
+
+def display_automatic_comparison():
+    """Render the requested result table and Pyecharts radar."""
+    baseline_saved = st.session_state.comparison_results.get("baseline")
+    agentic_saved = st.session_state.comparison_results.get("agentic")
+    missing_results = [
+        label
+        for label, saved in [
+            ("Baseline", baseline_saved),
+            ("Agentic", agentic_saved),
+        ]
+        if not saved or not (saved.get("message") or {}).get("content")
+    ]
+    results_ready = not missing_results
+
+    compare_clicked = st.button(
+        "Compare Results",
+        type="primary",
+        use_container_width=True,
+        key="compare_workspace_results",
+    )
+    if compare_clicked and results_ready:
+        st.session_state.comparison_requested = True
+    elif compare_clicked:
+        st.session_state.comparison_requested = False
+        st.warning(
+            "Run the missing workspace result first: "
+            + ", ".join(missing_results)
+            + "."
+        )
+
+    if not results_ready:
+        st.caption("A chart requires successful answers from both workspaces.")
+        return
+
+    if not st.session_state.comparison_requested:
+        st.caption("Both results are ready. Click Compare Results to create the chart.")
+        return
+
+    baseline = _comparison_metrics("baseline")
+    agentic = _comparison_metrics("agentic")
+
+    st.markdown("### Live Run Comparison")
+    if baseline["question"].strip() != agentic["question"].strip():
+        st.warning(
+            "The workspaces used different questions, so these results are not a "
+            "direct comparison. Use the same question in both workspaces."
+        )
+
+    import pandas as pd
+
+    table = pd.DataFrame([
+        {
+            "Workspace": "Baseline",
+            "Latency": f"{baseline['latency']:.2f}s",
+            "Sources": baseline["sources"],
+            "Words": baseline["words"],
+            "Strategy": baseline["strategy"],
+            "Validation": "N/A",
+            "Critic": "N/A",
+            "Rounds": baseline["rounds"],
+            "Citation check": (
+                "Passed"
+                if not baseline["invalid_citations"]
+                else "Invalid: " + ", ".join(
+                    f"[{value}]" for value in baseline["invalid_citations"]
+                )
+            ),
+        },
+        {
+            "Workspace": "Agentic",
+            "Latency": f"{agentic['latency']:.2f}s",
+            "Sources": agentic["sources"],
+            "Words": agentic["words"],
+            "Strategy": agentic["strategy"],
+            "Validation": (
+                f"{agentic['validation']:.2f}"
+                if agentic["validation"] is not None
+                else "N/A"
+            ),
+            "Critic": (
+                f"{agentic['critic']:.2f}"
+                if agentic["critic"] is not None
+                else "N/A"
+            ),
+            "Rounds": agentic["rounds"],
+            "Citation check": (
+                "Passed"
+                if not agentic["invalid_citations"]
+                else "Invalid: " + ", ".join(
+                    f"[{value}]" for value in agentic["invalid_citations"]
+                )
+            ),
+        },
+    ])
+    st.dataframe(table, use_container_width=True, hide_index=True)
+
+    st.markdown("### Current Result Charts")
+    try:
+        from pyecharts import options as opts
+        from pyecharts.charts import Line, Radar
+
+        max_sources = max(baseline["sources"], agentic["sources"], 1)
+        baseline_reliability = [
+            round(baseline["sources"] / max_sources * 100),
+            baseline["citation_integrity"],
+            min(100, int(baseline["rounds"] or 0) * 50),
+            0,
+            0,
+        ]
+        agentic_reliability = [
+            round(agentic["sources"] / max_sources * 100),
+            agentic["citation_integrity"],
+            min(100, int(agentic["rounds"] or 0) * 50),
+            round((agentic["validation"] or 0) * 100),
+            round((agentic["critic"] or 0) * 100),
+        ]
+
+        reliability_chart = (
+            Radar(init_opts=opts.InitOpts(width="100%", height="430px"))
+            .add_schema(
+                schema=[
+                    opts.RadarIndicatorItem(name="Evidence coverage", max_=100),
+                    opts.RadarIndicatorItem(name="Citation traceability", max_=100),
+                    opts.RadarIndicatorItem(name="Retrieval depth", max_=100),
+                    opts.RadarIndicatorItem(name="Validation", max_=100),
+                    opts.RadarIndicatorItem(name="Critic review", max_=100),
+                ],
+                splitarea_opt=opts.SplitAreaOpts(is_show=True),
+            )
+            .add(
+                "Baseline",
+                [baseline_reliability],
+                color="#315a8a",
+                areastyle_opts=opts.AreaStyleOpts(opacity=0.16),
+                label_opts=opts.LabelOpts(is_show=False),
+            )
+            .add(
+                "Agentic",
+                [agentic_reliability],
+                color="#ef5350",
+                areastyle_opts=opts.AreaStyleOpts(opacity=0.16),
+                label_opts=opts.LabelOpts(is_show=False),
+            )
+            .set_global_opts(
+                title_opts=opts.TitleOpts(title="Current Reliability Controls"),
+                legend_opts=opts.LegendOpts(pos_top="8%"),
+                tooltip_opts=opts.TooltipOpts(is_show=True),
+            )
+        )
+
+        latency_delta = agentic["latency"] - baseline["latency"]
+        latency_max = max(10, round(max(baseline["latency"], agentic["latency"]) * 1.2))
+        latency_chart = (
+            Line(init_opts=opts.InitOpts(width="100%", height="430px"))
+            .add_xaxis(["Baseline", "Agentic"])
+            .add_yaxis(
+                "Response time",
+                [round(baseline["latency"], 2), round(agentic["latency"], 2)],
+                color="#ef5350",
+                symbol="circle",
+                symbol_size=18,
+                is_smooth=False,
+                label_opts=opts.LabelOpts(
+                    is_show=True,
+                    position="top",
+                    formatter="{c}s",
+                    font_size=16,
+                ),
+                linestyle_opts=opts.LineStyleOpts(width=4),
+            )
+            .set_global_opts(
+                title_opts=opts.TitleOpts(
+                    title="Current Response Time",
+                    subtitle=f"Agentic overhead: {latency_delta:+.2f}s",
+                ),
+                legend_opts=opts.LegendOpts(is_show=False),
+                tooltip_opts=opts.TooltipOpts(is_show=True, trigger="axis"),
+                yaxis_opts=opts.AxisOpts(
+                    name="Seconds",
+                    min_=0,
+                    max_=latency_max,
+                    splitline_opts=opts.SplitLineOpts(is_show=True),
+                ),
+                xaxis_opts=opts.AxisOpts(
+                    axislabel_opts=opts.LabelOpts(font_size=14),
+                ),
+            )
+        )
+
+        reliability_col, latency_col = st.columns([1.35, 1], gap="large")
+        with reliability_col:
+            st.components.v1.html(reliability_chart.render_embed(), height=450)
+        with latency_col:
+            st.components.v1.html(latency_chart.render_embed(), height=450)
+        st.caption(
+            "Reliability indicators use only this run. Evidence coverage is "
+            "normalized against the larger current source count; retrieval depth "
+            "maps one round to 50 and two rounds to 100; Validation and Critic are "
+            "the current Agentic scores. Zero for Baseline means that the control "
+            "is not included, not that its answer accuracy is zero."
+        )
+    except Exception as exc:
+        st.warning(f"Current result charts unavailable: {exc}")
+
+    st.markdown("#### Hallucination Risk Controls")
+    safeguards = pd.DataFrame([
+        {
+            "Control": "Evidence-backed citations",
+            "Baseline": "Citation format check",
+            "Agentic": "Citation format check",
+        },
+        {
+            "Control": "Evidence validation",
+            "Baseline": "Not included",
+            "Agentic": (
+                f"Included ({agentic['validation']:.2f})"
+                if agentic["validation"] is not None else "Included"
+            ),
+        },
+        {
+            "Control": "Answer review",
+            "Baseline": "Not included",
+            "Agentic": (
+                f"Included ({agentic['critic']:.2f})"
+                if agentic["critic"] is not None else "Included"
+            ),
+        },
+        {
+            "Control": "Additional retrieval",
+            "Baseline": f"{baseline['rounds']} round",
+            "Agentic": f"{agentic['rounds']} rounds",
+        },
+    ])
+    st.dataframe(safeguards, use_container_width=True, hide_index=True)
+    st.caption(
+        "These controls reduce unsupported claims, but they do not prove that "
+        "hallucinations are impossible. The values above describe only the current "
+        "Baseline and Agentic runs."
+    )
+
+
+def _start_workspace_job(
+    mode: str,
+    file_bytes: bytes,
+    filename: str,
+    chunking_mode: str,
+):
+    """Start one independent background preparation job."""
+    current_job = st.session_state.workspace_jobs.get(mode)
+    if current_job and not current_job.done():
+        return
+
+    from src.workspace_processor import prepare_workspace
+
+    st.session_state.workspace_resources[mode]['ready'] = False
+    st.session_state.workspace_resources[mode].pop('error', None)
+    st.session_state.comparison_results[mode] = None
+    cached_evaluation = st.session_state.get("evaluation_results") or {}
+    evaluated_document = cached_evaluation.get("document_name")
+    if evaluated_document and evaluated_document != filename:
+        _clear_evaluation_cache()
+    st.session_state.workspace_jobs[mode] = (
+        st.session_state.workspace_executor.submit(
+            prepare_workspace,
+            file_bytes=file_bytes,
+            filename=filename,
+            mode=mode,
+            chunking_mode=chunking_mode,
+            embedder=st.session_state.embedder,
+        )
+    )
+
+
+def _collect_workspace_jobs() -> bool:
+    """Move completed background results into this Streamlit session."""
+    changed = False
+    for mode, future in list(st.session_state.workspace_jobs.items()):
+        if not future or not future.done():
+            continue
+
+        changed = True
+        st.session_state.workspace_jobs[mode] = None
+        try:
+            result = future.result()
+            document_record = result.pop('document_record')
+            st.session_state.workspace_resources[mode].update(result)
+            st.session_state.documents = [document_record]
+
+            # Keep legacy tabs aligned with the latest completed workspace.
+            st.session_state.vector_store = result['vector_store']
+            st.session_state.knowledge_graph = result['knowledge_graph']
+            st.session_state.parent_chunks = result['parent_chunks']
+            st.session_state.child_chunks = result['child_chunks']
+            st.session_state.rag_initialized = True
+            _save_demo_cache()
+        except Exception as exc:
+            st.session_state.workspace_resources[mode]['ready'] = False
+            st.session_state.workspace_resources[mode]['error'] = str(exc)
+    return changed
+
+
+@st.fragment(run_every=1.0)
+def display_workspace_job_status():
+    """Poll background jobs without blocking either workspace button."""
+    if _collect_workspace_jobs():
+        st.rerun()
+
+    running = [
+        mode.title()
+        for mode, future in st.session_state.workspace_jobs.items()
+        if future and not future.done()
+    ]
+    if running:
+        st.info(f"Preparing in background: {', '.join(running)}")
+
+
+def display_comparison_workspace(uploaded_file=None):
+    """Two independent document-processing and question-answer workspaces."""
+    st.subheader("RAG Workspace Comparison")
+    st.caption(
+        "Run each workflow independently, then compare their evidence, "
+        "quality checks, and response performance."
+    )
+
+    if uploaded_file is None and not st.session_state.documents:
+        st.info("Choose a document in the sidebar, then prepare each workspace below.")
+
+    baseline_job = st.session_state.workspace_jobs.get("baseline")
+    agentic_job = st.session_state.workspace_jobs.get("agentic")
+    baseline_processing = bool(baseline_job and not baseline_job.done())
+    agentic_processing = bool(agentic_job and not agentic_job.done())
+
+    baseline_col, agentic_col = st.columns(2, gap="large")
+
+    with baseline_col:
+        with st.container(border=True):
+            st.markdown("### Baseline Workspace")
+            st.caption("Vector retrieval → single LLM generation")
+            st.markdown("**Document preparation**")
+            st.caption(
+                uploaded_file.name
+                if uploaded_file is not None
+                else "Choose a file in the sidebar."
+            )
+            if st.button(
+                "Processing Baseline..." if baseline_processing else "Process Document for Baseline",
+                use_container_width=True,
+                key="process_baseline_workspace",
+                disabled=uploaded_file is None or baseline_processing,
+            ):
+                _start_workspace_job(
+                    "baseline",
+                    uploaded_file.getvalue(),
+                    uploaded_file.name,
+                    st.session_state.chunking_mode,
+                )
+                st.rerun()
+            if baseline_processing:
+                st.info("Building vector index... You can prepare Agentic at the same time.")
+            baseline_error = st.session_state.workspace_resources["baseline"].get("error")
+            if baseline_error:
+                st.error(f"Baseline preparation failed: {baseline_error}")
+            baseline_ready = st.session_state.workspace_resources["baseline"]["ready"]
+            if baseline_ready:
+                st.success("Vector index ready")
+            st.divider()
+            baseline_question = st.text_area(
+                "Baseline-only question",
+                height=88,
+                key="baseline_workspace_question",
+            )
+            if st.button(
+                "Run Baseline Only",
+                use_container_width=True,
+                key="run_baseline_workspace",
+                disabled=not baseline_ready,
+            ):
+                question = baseline_question.strip()
+                if question:
+                    message = _run_workspace_query("baseline", question)
+                    _store_comparison_result("baseline", question, message)
+                else:
+                    st.warning("Enter a Baseline question first.")
+            st.divider()
+            _display_workspace_result("baseline")
+
+    with agentic_col:
+        with st.container(border=True):
+            st.markdown("### Agentic Workspace")
+            st.caption("Planning → hybrid retrieval → validation → review")
+            st.markdown("**Document preparation**")
+            st.caption(
+                uploaded_file.name
+                if uploaded_file is not None
+                else "Choose a file in the sidebar."
+            )
+            if st.button(
+                "Processing Agentic..." if agentic_processing else "Process Document for Agentic",
+                type="primary",
+                use_container_width=True,
+                key="process_agentic_workspace",
+                disabled=uploaded_file is None or agentic_processing,
+            ):
+                _start_workspace_job(
+                    "agentic",
+                    uploaded_file.getvalue(),
+                    uploaded_file.name,
+                    st.session_state.chunking_mode,
+                )
+                st.rerun()
+            if agentic_processing:
+                st.info("Building vector index and knowledge graph... Baseline remains available.")
+            agentic_error = st.session_state.workspace_resources["agentic"].get("error")
+            if agentic_error:
+                st.error(f"Agentic preparation failed: {agentic_error}")
+            if not agentic_processing:
+                display_knowledge_graph_summary()
+            st.divider()
+            agentic_question = st.text_area(
+                "Agentic-only question",
+                height=88,
+                key="agentic_workspace_question",
+            )
+            if st.button(
+                "Run Agentic Only",
+                use_container_width=True,
+                key="run_agentic_workspace",
+                disabled=not st.session_state.workspace_resources["agentic"]["ready"],
+            ):
+                question = agentic_question.strip()
+                if question:
+                    message = _run_workspace_query("agentic", question)
+                    _store_comparison_result("agentic", question, message)
+                else:
+                    st.warning("Enter an Agentic question first.")
+            st.divider()
+            _display_workspace_result("agentic")
+
+    st.divider()
+    display_automatic_comparison()
+    display_workspace_job_status()
 
 def display_footer():
     """Display demo footer."""
-    mode_short = _rag_mode_short()
-
     st.divider()
     st.markdown(
         f'<p class="demo-footer">'
         f'Agentic RAG Thesis Demo &nbsp;|&nbsp; '
-        f'DeepSeek, BGE, ChromaDB, LangGraph &nbsp;|&nbsp; '
-        f'Mode: {mode_short}'
+        f'DeepSeek API, BGE, ChromaDB, LangGraph'
         f'</p>',
         unsafe_allow_html=True,
     )
@@ -1046,7 +1855,11 @@ def display_statistics():
             st.metric("Parent Chunks", total_parents)
         
         with col3:
-            queries_count = len([m for m in st.session_state.messages if m['role'] == 'user'])
+            queries_count = sum(
+                1
+                for result in st.session_state.comparison_results.values()
+                if result and (result.get("message") or {}).get("content")
+            )
             st.metric("Queries", queries_count)
         
         with col4:
@@ -1062,21 +1875,77 @@ def display_statistics():
             st.metric("Context", context)
         
         st.divider()
+def _display_cached_evaluation(evaluation_cache: dict) -> None:
+    """Render a completed evaluation from live or restored state."""
+    results = evaluation_cache["results"]
+    workflow_rows = evaluation_cache["workflow_rows"]
+    st.success(
+        "Evaluation results restored from cache."
+        if evaluation_cache.get("restored")
+        else "Full Agentic Workflow Evaluation Complete!"
+    )
+    st.caption(
+        f"Dataset: {evaluation_cache.get('dataset', 'Unknown')} | "
+        f"Questions: {evaluation_cache.get('question_count', len(workflow_rows))} | "
+        f"Completed: {evaluation_cache.get('completed_at', 'Unknown')}"
+    )
+    st.markdown("### Current Agentic Evaluation")
+    st.caption(
+        "These are heuristic scores for the current 8-question evaluation set, "
+        "not dissertation benchmark accuracy."
+    )
+    col1, col2, col3, col4 = st.columns(4)
+    with col1:
+        score = float(results["avg_overall"])
+        color = "Green" if score >= 0.7 else "Amber" if score >= 0.5 else "Red"
+        st.metric("Overall Heuristic Score", f"{score:.1%}", help=f"Status: {color}")
+    with col2:
+        st.metric("Citation Rate", f"{float(results['avg_citation_rate']):.1%}")
+    with col3:
+        st.metric("Context Usage", f"{float(results['avg_context_usage']):.1%}")
+    with col4:
+        st.metric(
+            "Regeneration Rate",
+            f"{float(results['improvement_rate']):.1%}",
+            help="Percentage of answers that required an additional rewrite.",
+        )
+
+    col5, col6 = st.columns(2)
+    with col5:
+        st.metric("Avg Quality Score", f"{float(results['avg_quality_score']):.1%}")
+    with col6:
+        st.metric("Avg Word Count", f"{float(results['avg_word_count']):.0f}")
+
+    st.markdown("### Detailed Results")
+    import pandas as pd
+
+    rows = []
+    for row_idx, score in enumerate(results["detailed_scores"]):
+        workflow_row = workflow_rows[row_idx]
+        rows.append({
+            "Question": score["query"][:50] + "...",
+            "Strategy": workflow_row["strategy"],
+            "Heuristic": f"{float(score['overall']):.1%}",
+            "Citations": "Pass" if score["has_citations"] else "Fail",
+            "Validation": f"{float(workflow_row['validation_score']):.1%}",
+            "Critic": f"{float(workflow_row['critic_score']):.1%}",
+            "Reliable": "Pass" if workflow_row["reliability_passed"] else "Fail",
+        })
+    st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+
+
 def display_evaluation_interface():
     """Display evaluation interface with custom evaluator."""
     
-    st.subheader("📊 System Evaluation")
+    st.subheader("System Evaluation")
     
     if not st.session_state.documents:
         st.info("Upload documents first to run evaluation")
         return
     
     st.markdown("""
-    **Custom Evaluation Metrics:**
-    - Citation Rate: Answers include proper citations
-    - Context Usage: Retrieved chunks are used in answers
-    - Answer Quality: Substantial and complete responses
-    - Self-Reflection: Improvement through regeneration
+    **Current evaluation checks:** citation presence, retrieved-context usage,
+    answer completeness, validation, critic review, and regeneration.
     """)
     
     # Load test questions
@@ -1144,7 +2013,7 @@ def display_evaluation_interface():
 
         if not _llm_api_key_ok():
             st.error(
-                "Set a valid ANTHROPIC_AUTH_TOKEN (DeepSeek API key) in `.env`, then refresh and try again."
+                "Set a valid OPENROUTER_API_KEY in `.env`, then refresh and try again."
             )
             return
 
@@ -1152,7 +2021,11 @@ def display_evaluation_interface():
 
         with st.spinner("Initializing complete Agentic RAG workflow..."):
             settings = get_settings()
-            llm = create_chat_model(settings)
+            planner_llm = create_chat_model(settings, model=settings.get_agent_model("planner"))
+            decomposer_llm = create_chat_model(settings, model=settings.get_agent_model("decomposer"), max_tokens=1000)
+            validator_llm = create_chat_model(settings, model=settings.get_agent_model("validator"))
+            writer_llm = create_chat_model(settings, model=settings.get_agent_model("writer"))
+            critic_llm = create_chat_model(settings, model=settings.get_agent_model("critic"))
 
             vector_agent = VectorSearchAgent(
                 vector_store=st.session_state.vector_store,
@@ -1177,13 +2050,13 @@ def display_evaluation_interface():
             )
 
             workflow = CompleteAgenticRAGWorkflow(
-                planner=PlannerAgent(llm=llm),
-                decomposer=QueryDecomposer(),
+                planner=PlannerAgent(llm=planner_llm),
+                decomposer=QueryDecomposer(llm=decomposer_llm),
                 coordinator=coordinator,
-                validator=ValidatorAgent(llm=llm),
+                validator=ValidatorAgent(llm=validator_llm),
                 synthesis=SynthesisAgent(),
-                writer=WriterAgent(llm=llm),
-                critic=CriticAgent(llm=llm, quality_threshold=0.7),
+                writer=WriterAgent(llm=writer_llm),
+                critic=CriticAgent(llm=critic_llm, quality_threshold=0.7),
             )
 
         # Process each question
@@ -1238,60 +2111,23 @@ def display_evaluation_interface():
             questions, all_answers, all_chunks_list, all_metadata
         )
         
-        # Display results
-        st.success("✅ Full Agentic Workflow Evaluation Complete!")
-        
-        st.markdown("### 📊 Overall Metrics")
-        
-        col1, col2, col3, col4 = st.columns(4)
-        
-        with col1:
-            score = results['avg_overall']
-            color = "🟢" if score >= 0.7 else "🟡" if score >= 0.5 else "🔴"
-            st.metric("Overall Quality", f"{color} {score:.1%}")
-        
-        with col2:
-            st.metric("Citation Rate", f"{results['avg_citation_rate']:.1%}")
-        
-        with col3:
-            st.metric("Context Usage", f"{results['avg_context_usage']:.1%}")
-        
-        with col4:
-            st.metric("Improvement Rate", f"{results['improvement_rate']:.1%}")
-        
-        # Additional metrics
-        col5, col6 = st.columns(2)
-        
-        with col5:
-            st.metric("Avg Quality Score", f"{results['avg_quality_score']:.1%}")
-        
-        with col6:
-            st.metric("Avg Word Count", f"{results['avg_word_count']:.0f}")
-        
-        # Detailed results table
-        st.markdown("### 📋 Detailed Results")
-        
-        import pandas as pd
-        
-        df_data = []
-        for row_idx, score in enumerate(results['detailed_scores']):
-            workflow_row = all_workflow_rows[row_idx]
-            df_data.append({
-                'Question': score['query'][:50] + '...',
-                'Strategy': workflow_row['strategy'],
-                'Overall': f"{score['overall']:.1%}",
-                'Citations': '✅' if score['has_citations'] else '❌',
-                'Words': score['word_count'],
-                'Validation': f"{workflow_row['validation_score']:.1%}",
-                'Critic': f"{workflow_row['critic_score']:.1%}",
-                'Reliable': '✅' if workflow_row['reliability_passed'] else '❌',
-                'Chunks': workflow_row['chunk_count'],
-                'Improved': '✅' if score['was_improved'] else '➖',
-                'Iterations': score['iterations']
-            })
-        
-        df = pd.DataFrame(df_data)
-        st.dataframe(df, use_container_width=True)
+        st.session_state.evaluation_results = {
+            "results": results,
+            "workflow_rows": all_workflow_rows,
+            "dataset": str(test_file),
+            "document_name": (
+                st.session_state.documents[0].get("name")
+                if st.session_state.documents else None
+            ),
+            "question_count": len(questions),
+            "completed_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        }
+        _save_evaluation_cache(st.session_state.evaluation_results)
+        _save_demo_cache()
+
+    evaluation_cache = st.session_state.get("evaluation_results")
+    if evaluation_cache:
+        _display_cached_evaluation(evaluation_cache)
 
 def display_document_preview():
     """Show preview of uploaded documents."""
@@ -1319,14 +2155,13 @@ def display_document_preview():
                     st.metric("Type", doc.get('type', 'PDF'))
                 
                 with col2:
-                    st.metric("Pages", doc.get('pages', 'N/A'))
+                    st.metric("Parent Chunks", doc.get('parents', 0))
                 
                 with col3:
-                    st.metric("Chunks", doc['chunks'])
+                    st.metric("Child Chunks", doc['chunks'])
                 
                 with col4:
-                    mode = doc.get('chunking_mode', 'flat')
-                    st.metric("Chunking", "Hier" if mode == "hierarchical" else "Flat")
+                    st.metric("Chunking", "Parent-Child")
                 
                 # Show chunking info
                 if doc.get('chunking_mode') == 'hierarchical':
@@ -1341,7 +2176,8 @@ def display_document_preview():
                     try:
                         from src.ingestion.document_loader import DocumentLoader
                         loader = DocumentLoader()
-                        text = loader.load(doc['path'])
+                        loaded_document = loader.load(doc['path'])
+                        text = loaded_document.text
                         
                         # Show first 1000 characters
                         preview_text = text[:1000]
@@ -1360,20 +2196,138 @@ def display_document_preview():
                         
                     except Exception as e:
                         st.error(f"Error loading preview: {e}")
+
+        display_chunk_structure()
+
+
+def display_chunk_structure():
+    """Inspect the actual parent-child records stored in ChromaDB."""
+    workspace = next(
+        (
+            st.session_state.workspace_resources[mode]
+            for mode in ("agentic", "baseline")
+            if st.session_state.workspace_resources[mode].get("ready")
+        ),
+        None,
+    )
+    store = (workspace or {}).get("vector_store")
+    if not store:
+        return
+
+    with st.expander("Parent-Child Internal Structure", expanded=False):
+        try:
+            parent_data = store.parent_collection.get(
+                include=["documents", "metadatas"]
+            )
+            child_data = store.child_collection.get(
+                include=["documents", "metadatas"]
+            )
+            parents = [
+                {
+                    "id": chunk_id,
+                    "text": text,
+                    "metadata": metadata or {},
+                }
+                for chunk_id, text, metadata in zip(
+                    parent_data.get("ids", []),
+                    parent_data.get("documents", []),
+                    parent_data.get("metadatas", []),
+                )
+            ]
+            children = [
+                {
+                    "id": chunk_id,
+                    "text": text,
+                    "metadata": metadata or {},
+                }
+                for chunk_id, text, metadata in zip(
+                    child_data.get("ids", []),
+                    child_data.get("documents", []),
+                    child_data.get("metadatas", []),
+                )
+            ]
+            if not parents:
+                st.info("No parent chunks are stored for this document.")
+                return
+
+            st.caption(
+                f"Stored hierarchy: {len(parents)} parent chunk(s) and "
+                f"{len(children)} child chunk(s)."
+            )
+            parent_ids = [parent["id"] for parent in parents]
+            selected_parent_id = st.selectbox(
+                "Select a parent chunk",
+                parent_ids,
+                format_func=lambda value: f"Parent {parent_ids.index(value) + 1}: {value}",
+                key="chunk_structure_parent",
+            )
+            parent = next(item for item in parents if item["id"] == selected_parent_id)
+            linked_children = [
+                child
+                for child in children
+                if child["metadata"].get("parent_id") == selected_parent_id
+            ]
+
+            parent_a, parent_b = st.columns(2)
+            with parent_a:
+                st.metric("Parent tokens", parent["metadata"].get("token_count", "N/A"))
+            with parent_b:
+                st.metric("Linked children", len(linked_children))
+            st.code(f"Parent ID: {selected_parent_id}", language="text")
+            st.text_area(
+                "Parent text",
+                parent["text"],
+                height=180,
+                disabled=True,
+                key=f"parent_text_{selected_parent_id}",
+            )
+
+            st.markdown("**Children linked to this parent**")
+            for index, child in enumerate(linked_children, 1):
+                metadata = child["metadata"]
+                with st.container(border=True):
+                    child_a, child_b = st.columns([3, 1])
+                    with child_a:
+                        st.code(
+                            f"Child {index} ID: {child['id']}\n"
+                            f"Parent ID: {metadata.get('parent_id', 'N/A')}",
+                            language="text",
+                        )
+                    with child_b:
+                        st.metric("Tokens", metadata.get("token_count", "N/A"))
+                    st.text_area(
+                        f"Child {index} text",
+                        child["text"],
+                        height=130,
+                        disabled=True,
+                        key=f"child_text_{child['id']}",
+                    )
+        except Exception as exc:
+            st.error(f"Could not load the stored chunk structure: {exc}")
                         
 def display_chat_messages():
     """Display chat message history."""
     
     if not st.session_state.messages:
-        st.markdown("""
-        #### Welcome
-
-        1. **Upload** a document in the sidebar and wait for indexing  
-        2. Choose **Agentic RAG** or **Baseline** for comparison  
-        3. Ask a question below  
-
-        **Proposed system:** multi-agent orchestration, hybrid retrieval, self-reflection, GraphRAG
-        """)
+        if st.session_state.get("rag_mode", "agentic") == "baseline":
+            st.markdown(
+                "#### Welcome\n\n"
+                "1. **Upload** a document in the sidebar and wait for indexing  \n"
+                "2. Choose **Agentic RAG** or **Baseline** for comparison  \n"
+                "3. Ask a question below\n\n"
+                "**Current pipeline:** vector retrieval → single LLM generation\n\n"
+                "**Not used:** BM25, graph retrieval, planning, validation, "
+                "criticism, reliability gate"
+            )
+        else:
+            st.markdown(
+                "#### Welcome\n\n"
+                "1. **Upload** a document in the sidebar and wait for indexing  \n"
+                "2. Choose **Agentic RAG** or **Baseline** for comparison  \n"
+                "3. Ask a question below\n\n"
+                "**Proposed system:** multi-agent orchestration, hybrid retrieval, "
+                "self-reflection, GraphRAG"
+            )
         return
     
     for message in st.session_state.messages:
@@ -1429,7 +2383,7 @@ def display_chat_messages():
                             st.text(citation['text_preview'])        
 
 def display_chat_input():
-    """Display chat input field (must be outside tabs)."""
+    """Display the single-mode input inside the Chat workspace."""
     
     # Only show if documents uploaded
     if not st.session_state.documents:
@@ -1450,13 +2404,70 @@ def display_chat_input():
     # Chat input (must be at root level, not in tabs/columns/expander)
     if prompt := st.chat_input("Ask a question about your documents..."):
         if not _llm_api_key_ok():
-            st.error("Configure ANTHROPIC_AUTH_TOKEN in `.env` and refresh the page.")
+            st.error("Configure OPENROUTER_API_KEY in `.env` and refresh the page.")
             return
         process_user_query(prompt)
         try:
             st.rerun()
         except AttributeError:
             st.experimental_rerun()
+
+
+def display_single_chat_workspace(uploaded_file=None):
+    """Render the independently selected single-mode chat workspace."""
+    mode = st.selectbox(
+        "Chat workspace",
+        options=["agentic", "baseline"],
+        format_func=lambda value: {
+            "agentic": "Agentic workspace (proposed)",
+            "baseline": "Baseline workspace (naive RAG)",
+        }[value],
+        key="rag_mode",
+    )
+
+    process_label = (
+        "Process Document for Agentic"
+        if mode == "agentic"
+        else "Process Document for Baseline"
+    )
+    if st.button(
+        process_label,
+        type="primary",
+        key="process_single_chat_workspace",
+        disabled=uploaded_file is None,
+    ):
+        process_uploaded_file(uploaded_file, processing_rag_mode=mode)
+
+    if uploaded_file is None:
+        st.caption("Choose a document in the sidebar before processing.")
+
+    if mode == "agentic" and st.session_state.rag_initialized:
+        with st.expander("Knowledge Graph", expanded=False):
+            display_knowledge_graph_summary()
+    elif mode == "baseline" and st.session_state.rag_initialized:
+        st.info(
+            "Baseline uses vector retrieval only. Knowledge graph and agent "
+            "quality checks are disabled."
+        )
+
+    if st.session_state.documents:
+        st.markdown("**Sample questions**")
+        sample_cols = st.columns(2)
+        sample_questions = [
+            "What is this document about?",
+            "Summarize the main points",
+            "What are the key findings?",
+            "Give me specific details",
+        ]
+        for index, question in enumerate(sample_questions):
+            with sample_cols[index % 2]:
+                if st.button(question, key=f"sample_{question}"):
+                    st.session_state.sample_query = question
+
+    st.divider()
+    display_chat_messages()
+    display_chat_input()
+
 
 def main():
     """Main application."""
@@ -1468,77 +2479,25 @@ def main():
     display_header()
     
     # Sidebar
-    sidebar()
+    uploaded_file = sidebar()
    
     # Main content tabs
-    tab1, tab2, tab3, tab4 = st.tabs(
-        ["Chat", "Evaluation", "Statistics", "Performance"]
+    tab_compare, tab_eval, tab_stats = st.tabs(
+        ["Compare", "Evaluation", "Statistics"]
     )
 
-    with tab1:
-        display_chat_messages()
-    
-    with tab2:
+    with tab_compare:
+        display_comparison_workspace(uploaded_file)
+
+    with tab_eval:
         # Evaluation interface
         display_evaluation_interface()
     
-    with tab3:
+    with tab_stats:
         # Statistics and preview
         display_statistics()
         display_document_preview()
 
-    with tab4:
-        st.subheader("⚡ Performance Metrics")
-        
-        if 'performance_tracker' in st.session_state:
-            stats = st.session_state.performance_tracker.get_stats()
-            
-            if stats:
-                # Key metrics
-                col1, col2, col3, col4 = st.columns(4)
-                
-                with col1:
-                    st.metric("Total Queries", stats['total_queries'])
-                
-                with col2:
-                    avg_lat = stats['avg_latency_ms'] / 1000
-                    color = "🟢" if avg_lat < 3 else "🟡" if avg_lat < 5 else "🔴"
-                    st.metric("Avg Latency", f"{color} {avg_lat:.2f}s")
-                
-                with col3:
-                    st.metric("Cache Hit Rate", f"{stats['cache_hit_rate']:.1%}")
-                
-                with col4:
-                    st.metric("Avg Chunks", f"{stats['avg_chunks']:.1f}")
-                
-                # Latency breakdown
-                st.markdown("### ⏱️ Latency Breakdown")
-                
-                col5, col6 = st.columns(2)
-                
-                with col5:
-                    st.metric("Min Latency", f"{stats['min_latency_ms']/1000:.2f}s")
-                
-                with col6:
-                    st.metric("Max Latency", f"{stats['max_latency_ms']/1000:.2f}s")
-                
-                # Session info
-                st.info(f"📊 Session Duration: {stats['session_duration_min']:.1f} minutes")
-                
-                # Save metrics button
-                if st.button("💾 Save Metrics"):
-                    st.session_state.performance_tracker.save_metrics()
-                    st.success("✅ Metrics saved to data/metrics.json")
-            
-            else:
-                st.info("No queries processed yet. Ask some questions to see metrics!")
-        
-        else:
-            st.info("Performance tracking will start after your first query.")
-
-    # Chat input MUST be outside tabs
-    display_chat_input()
-    
     # Footer
     display_footer()
 

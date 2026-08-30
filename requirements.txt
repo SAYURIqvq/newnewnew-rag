@@ -39,6 +39,7 @@ langchain-text-splitters>=0.3.0 # ← Text chunking
 # ============================================
 networkx>=3.0                   # ← NEW: Graph structures
 spacy>=3.5.0                    # ← NEW: NER for entity extraction
+https://github.com/explosion/spacy-models/releases/download/en_core_web_md-3.8.0/en_core_web_md-3.8.0-py3-none-any.whl
 
 # ============================================
 # MATH & VECTORS
@@ -56,6 +57,7 @@ pydantic-settings>=2.0.0        # ← NEW: Settings management
 # WEB UI
 # ============================================
 streamlit>=1.28.0
+pyecharts>=2.0,<3.0
 pyarrow==14.0.1                 # ← Streamlit dependency
 
 # ============================================

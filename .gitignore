@@ -35,7 +35,13 @@ data/agentic_rag.db
 data/uploads/*.pdf
 data/uploads/*.docx
 data/uploads/*.txt
+data/uploads/baseline/
+data/uploads/agentic/
 data/chroma_db/*/
+data/chroma_db_baseline/
+data/chroma_db_agentic/
+data/demo_session_cache.json
+data/evaluation_results_cache.json
 data/test_*
 
 # Logs
@@ -65,3 +71,6 @@ data/chromadb/
 data/metrics.json
 data/chroma_db/
 data/chroma_db/
+
+# Generated demo output
+reports/

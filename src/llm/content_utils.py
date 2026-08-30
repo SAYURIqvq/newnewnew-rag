@@ -1,4 +1,4 @@
-"""Normalize LLM response content (DeepSeek / Anthropic may return block lists)."""
+"""Normalize LLM response content from provider-specific message formats."""
 
 from typing import Any, List
 
@@ -7,7 +7,7 @@ def extract_llm_text(content: Any) -> str:
     """
     Convert LLM message content to a plain string.
 
-    DeepSeek's Anthropic-compatible API may return:
+    Some LLM providers may return:
     - str
     - list of blocks: [{"type": "thinking", ...}, {"type": "text", "text": "..."}]
     """

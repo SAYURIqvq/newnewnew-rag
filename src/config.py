@@ -6,6 +6,7 @@ import os
 from typing import Optional, List
 from pydantic_settings import BaseSettings
 from pydantic import Field, field_validator, ConfigDict, AliasChoices
+from dotenv import dotenv_values
 
 
 class Settings(BaseSettings):
@@ -21,8 +22,10 @@ class Settings(BaseSettings):
     # ===== API Keys =====
     anthropic_auth_token: Optional[str] = Field(
         default=None,
-        description="DeepSeek / Anthropic-compatible API token",
+        description="OpenRouter / OpenAI-compatible API token",
         validation_alias=AliasChoices(
+            "OPENROUTER_API_KEY",
+            "OPENAI_API_KEY",
             "ANTHROPIC_AUTH_TOKEN",
             "ANTHROPIC_API_KEY",
             "DASHSCOPE_API_KEY",
@@ -43,17 +46,42 @@ class Settings(BaseSettings):
     
     # ===== Model Configuration =====
     llm_model: str = Field(
-        default="deepseek-chat",
-        description="Chat model name (DeepSeek via Anthropic-compatible API)",
-        validation_alias=AliasChoices("ANTHROPIC_MODEL", "LLM_MODEL"),
+        default="deepseek/deepseek-v4-flash",
+        description="Default chat model name",
+        validation_alias=AliasChoices("OPENAI_MODEL", "OPENROUTER_MODEL", "ANTHROPIC_MODEL", "LLM_MODEL"),
     )
     llm_temperature: float = Field(default=0.0, description="LLM temperature (0.0-1.0)", ge=0.0, le=1.0)
     llm_max_tokens: int = Field(default=4096, description="Maximum tokens for LLM response", gt=0)
     anthropic_base_url: str = Field(
-        default="https://api.deepseek.com/anthropic",
-        description="Anthropic-compatible API base URL (DeepSeek)",
-        validation_alias=AliasChoices("ANTHROPIC_BASE_URL", "QWEN_BASE_URL"),
+        default="https://openrouter.ai/api/v1",
+        description="OpenAI-compatible API base URL",
+        validation_alias=AliasChoices("OPENAI_BASE_URL", "OPENROUTER_BASE_URL", "ANTHROPIC_BASE_URL", "QWEN_BASE_URL"),
         min_length=10,
+    )
+    planner_model: Optional[str] = Field(
+        default=None,
+        description="Optional model override for the Planner Agent",
+        validation_alias=AliasChoices("PLANNER_MODEL", "OPENAI_PLANNER_MODEL"),
+    )
+    decomposer_model: Optional[str] = Field(
+        default=None,
+        description="Optional model override for the Query Decomposer",
+        validation_alias=AliasChoices("DECOMPOSER_MODEL", "OPENAI_DECOMPOSER_MODEL"),
+    )
+    validator_model: Optional[str] = Field(
+        default=None,
+        description="Optional model override for the Validator Agent",
+        validation_alias=AliasChoices("VALIDATOR_MODEL", "OPENAI_VALIDATOR_MODEL"),
+    )
+    writer_model: Optional[str] = Field(
+        default=None,
+        description="Optional model override for the Writer Agent",
+        validation_alias=AliasChoices("WRITER_MODEL", "OPENAI_WRITER_MODEL"),
+    )
+    critic_model: Optional[str] = Field(
+        default=None,
+        description="Optional model override for the Critic Agent",
+        validation_alias=AliasChoices("CRITIC_MODEL", "OPENAI_CRITIC_MODEL"),
     )
     embedding_model: str = Field(default="BAAI/bge-large-en-v1.5", description="Embedding model to use")
     embedding_device: str = Field(
@@ -94,6 +122,40 @@ class Settings(BaseSettings):
     batch_size: int = Field(default=128, description="Batch size for embedding generation", gt=0)
     parallel_retrieval: bool = Field(default=True, description="Enable parallel retrieval agents")
     request_timeout: int = Field(default=30, description="Request timeout in seconds", gt=0)
+
+    def model_post_init(self, __context) -> None:
+        """Prefer the current OpenRouter/OpenAI variable names over legacy aliases."""
+        env_file_values = dotenv_values(".env")
+
+        def current_value(*names: str) -> Optional[str]:
+            for name in names:
+                value = env_file_values.get(name) or os.environ.get(name)
+                if value:
+                    return str(value)
+            return None
+
+        api_key = current_value("OPENROUTER_API_KEY", "OPENAI_API_KEY")
+        if api_key:
+            self.anthropic_auth_token = api_key
+
+        model = current_value("OPENAI_MODEL", "OPENROUTER_MODEL")
+        if model:
+            self.llm_model = model
+
+        base_url = current_value("OPENAI_BASE_URL", "OPENROUTER_BASE_URL")
+        if base_url:
+            self.anthropic_base_url = base_url
+
+        for field_name, env_names in {
+            "planner_model": ("PLANNER_MODEL", "OPENAI_PLANNER_MODEL"),
+            "decomposer_model": ("DECOMPOSER_MODEL", "OPENAI_DECOMPOSER_MODEL"),
+            "validator_model": ("VALIDATOR_MODEL", "OPENAI_VALIDATOR_MODEL"),
+            "writer_model": ("WRITER_MODEL", "OPENAI_WRITER_MODEL"),
+            "critic_model": ("CRITIC_MODEL", "OPENAI_CRITIC_MODEL"),
+        }.items():
+            value = current_value(*env_names)
+            if value:
+                setattr(self, field_name, value)
     
     @field_validator("keyword_search_weight")
     @classmethod
@@ -167,6 +229,17 @@ class Settings(BaseSettings):
             "api_key": self.anthropic_auth_token,
             "base_url": self.anthropic_base_url,
         }
+
+    def get_agent_model(self, agent_name: str) -> str:
+        """Return the configured model for an agent, falling back to the default model."""
+        overrides = {
+            "planner": self.planner_model,
+            "decomposer": self.decomposer_model,
+            "validator": self.validator_model,
+            "writer": self.writer_model,
+            "critic": self.critic_model,
+        }
+        return overrides.get(agent_name, None) or self.llm_model
     
     def is_production(self) -> bool:
         """Check if running in production environment."""

@@ -82,6 +82,7 @@ class WriterAgent(BaseAgent):
         if llm is None:
             self.llm = create_qwen_chat_model(
                 settings,
+                model=settings.get_agent_model("writer"),
                 temperature=temperature,
                 max_tokens=max_tokens,
             )
@@ -176,78 +177,23 @@ class WriterAgent(BaseAgent):
             Generated answer with citations
         """
         # Prepare context from chunks
-        context_parts = []
-        for i, chunk in enumerate(chunks, 1):
-            source = chunk.metadata.get('filename', 'unknown')
-            score = chunk.score if chunk.score else 0.0
-            context_parts.append(
-                f"[{i}] (Source: {source}, Relevance: {score:.2f})\n{chunk.text}\n"
-            )
-        
-        context = "\n".join(context_parts)
+        context = self._build_compact_context(chunks)
         
         # Create prompt with strict citation rules
-        prompt = f"""You are a precise and faithful assistant. Your ONLY job is to answer questions using the provided context. You must NEVER add information that is not explicitly stated in the context.
+        prompt = f"""Answer the question using only the numbered evidence excerpts.
 
 User Question: {query}
 
-Context (with source references):
+Evidence:
 {context}
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-GROUNDING RULES (most important):
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-1. EVERY claim in your answer MUST come directly from the context above
-2. Do NOT infer, assume, or add information beyond what the context states
-3. Do NOT paraphrase in a way that changes the meaning
-4. If the context does not contain the answer, say:
-   "The provided documents do not contain information about [topic]."
-5. Do NOT use your general knowledge — ONLY the context matters
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-CITATION RULES:
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-1. Cite ONLY the specific chunk(s) that directly support EACH statement
-2. Use inline citations: [1], [2], [3] — NOT grouped like [1][2][3][4]
-3. Each sentence should cite ONLY the chunks it actually uses
-4. If a statement uses ONLY chunk 2, cite [2] alone
-5. If combining info from chunks 2 and 5, cite [2][5]
-6. Different paragraphs will naturally cite DIFFERENT chunks
-7. DO NOT cite all chunks in every paragraph
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-EXAMPLES:
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-❌ WRONG — adds info not in context (hallucination):
-"Machine learning was invented in 1950 by Alan Turing [1]."
-(If context does not explicitly say this, do NOT write it)
-
-❌ WRONG — groups citations:
-"ML is AI subset [1][2]. Uses algorithms [1][2]."
-
-❌ WRONG — uses general knowledge:
-"As is commonly known, neural networks have multiple layers."
-(Only write this if the context actually states it)
-
-✅ CORRECT — grounded + proper citation:
-"Machine learning is a subset of artificial intelligence [1]. 
-It uses algorithms to learn patterns from data [2]."
-
-✅ CORRECT — honest when info is missing:
-"The provided documents do not contain information about 
-the history of machine learning."
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-INSTRUCTIONS:
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-1. Answer using ONLY information from context
-2. Cite specific chunks per statement
-3. For answerable questions, write 3-6 concise sentences
-4. If context lacks info, state clearly using the template above
-5. Write naturally but stay strictly grounded
-6. DO NOT add "Sources:" section — ONLY inline citations
-7. End your answer immediately after the last sentence
-8. If you answer with any document fact, include at least one inline citation
+Requirements:
+- Silently make a checklist of every clause in the question and answer each one.
+- Ground every factual sentence in the excerpts and cite its exact number, such as [2].
+- State clearly when an item cannot be answered from the excerpts.
+- Cover conditions, exclusions, conflicting results, and evidence gaps when requested.
+- Use no outside knowledge and do not add a Sources section.
+- Start directly with the answer and stay under 260 words.
 
 Answer (inline citations only, no Sources section):"""
         
@@ -256,6 +202,11 @@ Answer (inline citations only, no Sources section):"""
             response = self.llm.invoke(prompt)
             from src.llm.content_utils import extract_llm_text
             answer = extract_llm_text(response.content)
+            if not answer.strip():
+                raise WriterError(
+                    message="The model returned no final answer text",
+                    details={"hint": "Disable reasoning or increase output tokens"},
+                )
             
             return answer
             
@@ -407,12 +358,7 @@ Answer (inline citations only, no Sources section):"""
             ... )
         """
         # Prepare context
-        context_parts = []
-        for i, chunk in enumerate(chunks, 1):
-            source = chunk.metadata.get('filename', 'unknown')
-            context_parts.append(f"[{i}] (Source: {source})\n{chunk.text}\n")
-        
-        context = "\n".join(context_parts)
+        context = self._build_compact_context(chunks)
         
         # Create improvement prompt
         prompt = f"""You are improving an answer based on feedback.
@@ -430,6 +376,10 @@ Instructions:
 2. Use inline citations [1], [2], [3]
 3. Maintain accuracy and source attribution
 4. Address all points in the feedback
+5. Keep the complete answer under 260 words
+6. Start directly with the answer
+7. Do not mention feedback, revision, improvement, or the writing process
+8. Silently check every clause in the original question and answer each one explicitly
 
 Improved Answer:"""
         
@@ -437,6 +387,11 @@ Improved Answer:"""
             response = self.llm.invoke(prompt)
             from src.llm.content_utils import extract_llm_text
             answer = extract_llm_text(response.content)
+            if not answer.strip():
+                raise WriterError(
+                    message="The model returned no regenerated answer text",
+                    details={"hint": "Disable reasoning or increase output tokens"},
+                )
             
             cited_answer = self._ensure_minimum_citation(answer, chunks)
             return self._format_answer(cited_answer, chunks)
@@ -447,3 +402,24 @@ Improved Answer:"""
                 message=f"Failed to regenerate answer: {str(e)}",
                 details={"feedback": feedback}
             ) from e
+
+    def _build_compact_context(
+        self,
+        chunks: List[Chunk],
+        total_chars: int = 6500,
+        per_chunk_chars: int = 1400,
+    ) -> str:
+        """Build a bounded evidence prompt that fits low-credit API limits."""
+        parts = []
+        used = 0
+        for i, chunk in enumerate(chunks, 1):
+            remaining = total_chars - used
+            if remaining <= 0:
+                break
+            text = " ".join(chunk.text.split())[:min(per_chunk_chars, remaining)]
+            if not text:
+                continue
+            part = f"[{i}] {text}"
+            parts.append(part)
+            used += len(part)
+        return "\n\n".join(parts)

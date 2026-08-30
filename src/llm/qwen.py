@@ -1,4 +1,4 @@
-"""Backward-compatible alias — project LLM is now DeepSeek (Anthropic-compatible API)."""
+"""Backward-compatible alias — project LLM is now OpenRouter (OpenAI-compatible API)."""
 
 from src.llm.chat_model import create_chat_model
 

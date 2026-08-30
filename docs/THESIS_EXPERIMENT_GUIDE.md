@@ -7,7 +7,7 @@ How to produce: **experiment table**, **case studies**, and **architecture figur
 ## Prerequisites
 
 1. Documents indexed in `data/chroma_db` (upload via Streamlit first).
-2. `.env` contains valid `ANTHROPIC_AUTH_TOKEN`.
+2. `.env` contains valid `OPENROUTER_API_KEY`.
 3. BM25 index built (optional but helps Agentic): `python build_bm25_index.py`
 
 ---
@@ -93,7 +93,7 @@ Use `docs/THESIS_ARCHITECTURE.md`:
 
 ### Chapter 5 Experiments
 
-1. **Setup** — hardware, DeepSeek, BGE, ChromaDB, dataset size, N questions.
+1. **Setup** — hardware, OpenRouter model, BGE, ChromaDB, dataset size, N questions.
 2. **Metrics** — Faithfulness, Answer Relevancy, Context Precision/Recall (RAGAS).
 3. **Main results** — paste `summary_table.md`.
 4. **Per-category analysis** — group CSV by `category` column.

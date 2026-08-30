@@ -380,6 +380,9 @@ class CompleteAgenticRAGWorkflow:
         
         try:
             result = self.critic.run(state)
+
+            if "initial_critic_score" not in result.metadata:
+                result.metadata["initial_critic_score"] = result.critic_score
             
             self.logger.info(
                 f"Critic: score={result.critic_score:.2f}, "
@@ -413,6 +416,19 @@ class CompleteAgenticRAGWorkflow:
             "retry" to retry retrieval, "proceed" to continue
         """
         decision = state.validation_status
+        strategy = (
+            state.strategy.value
+            if hasattr(state.strategy, "value")
+            else str(state.strategy or "")
+        ).lower()
+
+        # A multihop plan must perform more than one retrieval round. Validation
+        # after round one measures relevance, but not whether every hop was explored.
+        if strategy == "multihop" and state.retrieval_round < 2:
+            self.logger.info(
+                "Multihop strategy requires a second evidence retrieval round"
+            )
+            return "retry"
         
         if decision == "PROCEED":
             self.logger.info("✅ Validation passed → Proceeding to synthesis")

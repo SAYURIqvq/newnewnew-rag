@@ -86,6 +86,7 @@ class CriticAgent(BaseAgent):
         if llm is None:
             self.llm = create_qwen_chat_model(
                 settings,
+                model=settings.get_agent_model("critic"),
                 temperature=0.0,  # Deterministic for consistency
                 max_tokens=2000,
             )
@@ -192,8 +193,10 @@ class CriticAgent(BaseAgent):
         """
         # Prepare context
         context_parts = []
-        for i, chunk in enumerate(chunks[:5], 1):  # Use top 5
-            context_parts.append(f"[{i}] {chunk.text[:200]}...")
+        for i, chunk in enumerate(chunks[:6], 1):
+            # The writer sees full chunks, so the critic needs enough of the same
+            # evidence to judge completeness and citations fairly.
+            context_parts.append(f"[{i}] {chunk.text[:700]}")
         
         context = "\n".join(context_parts)
         

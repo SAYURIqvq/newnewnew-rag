@@ -116,8 +116,14 @@ class RetrievalCoordinator(BaseAgent):
         """
         try:
             query = state.query
-            retrieval_queries = state.sub_queries or [query]
             current_round = state.retrieval_round
+            retrieval_queries = list(state.sub_queries or [query])
+            if current_round > 0:
+                retrieval_queries.append(
+                    f"{query} Focus on missing conditions, exceptions, exclusions, "
+                    "conflicting results, limitations, and unanswered details."
+                )
+            previous_chunks = list(state.chunks)
             
             self.log(
                 f"Starting retrieval round {current_round} for query: {query[:50]}...",
@@ -141,7 +147,8 @@ class RetrievalCoordinator(BaseAgent):
             )
             
             # Step 2: Deduplicate
-            unique_chunks = self._deduplicate(all_results)
+            # Keep evidence found in earlier hops while adding the new round.
+            unique_chunks = self._deduplicate(previous_chunks + all_results)
             
             self.log(
                 f"Deduplication: {len(all_results)} → {len(unique_chunks)} unique chunks",

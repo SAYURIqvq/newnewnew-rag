@@ -41,7 +41,7 @@ class NaiveRAG:
         self.embedder = embedder or EmbeddingGenerator()
         if writer is None:
             settings = get_settings()
-            llm = create_qwen_chat_model(settings)
+            llm = create_qwen_chat_model(settings, model=settings.get_agent_model("writer"))
             writer = WriterAgent(llm=llm)
         self.writer = writer
 

@@ -247,7 +247,7 @@ Feedback Mechanisms
 
 ### Prerequisites
 
-Python 3.12+, Git, DeepSeek-compatible API key
+Python 3.12+, Git, OpenRouter API key
 
 ### Installation
 
@@ -263,8 +263,9 @@ python -m spacy download en_core_web_md
 
 cp .env.example .env
 # Fill in:
-#   ANTHROPIC_AUTH_TOKEN=your_deepseek_api_key
-#   ANTHROPIC_BASE_URL=https://api.deepseek.com/anthropic
+#   OPENROUTER_API_KEY=your_openrouter_api_key
+#   OPENAI_BASE_URL=https://openrouter.ai/api/v1
+#   OPENAI_MODEL=deepseek/deepseek-v4-flash
 #   EMBEDDING_MODEL=BAAI/bge-large-en-v1.5
 ```
 
@@ -307,7 +308,7 @@ Every answer includes inline citations (`[1]`, `[2]`, …) tracing each claim to
 
 | Layer | Technology | Role |
 |-------|-----------|------|
-| LLM | DeepSeek via Anthropic-compatible API | Generation, validation, critique |
+| LLM | OpenRouter via OpenAI-compatible API | Generation, validation, critique |
 | Embeddings | BGE-large (`BAAI/bge-large-en-v1.5`) | Semantic vectors |
 | Orchestration | LangChain + LangGraph | Agent wiring, state-machine workflows |
 | Vector DB | ChromaDB | Persistent vector storage |
@@ -355,7 +356,7 @@ newnewnew-rag/
 │   │   ├── chroma_store.py
 │   │   └── database.py
 │   ├── evaluation/                     # Quality measurement
-│   │   ├── ragas_evaluator.py          # RAGAS (DeepSeek + BGE)
+│   │   ├── ragas_evaluator.py          # RAGAS (OpenRouter + BGE)
 │   │   └── simple_evaluator.py         # Lightweight rule-based metrics
 │   ├── orchestration/                  # LangGraph workflows
 │   │   ├── complete_workflow.py        # Full 7-node pipeline
@@ -438,7 +439,7 @@ MIT License — see [LICENSE](LICENSE)
 
 ## Acknowledgments
 
-- **DeepSeek** — LLM API
+- **OpenRouter** — LLM API
 - **BAAI BGE** — Embedding model
 - **Microsoft Research** — GraphRAG methodology
 - **LangChain / LangGraph** — Orchestration framework
