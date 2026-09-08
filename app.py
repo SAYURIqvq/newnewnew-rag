@@ -159,6 +159,15 @@ def _clean_agentic_answer(answer: str, max_words: int = 300) -> str:
 
 SESSION_CACHE_PATH = Path("data/demo_session_cache.json")
 EVALUATION_CACHE_PATH = Path("data/evaluation_results_cache.json")
+DEFAULT_DEMO_QUESTION = (
+    "Should Northstar approve the Transformer assistant for production? Give a "
+    "conditional recommendation that reconciles the early pilot, expanded "
+    "evaluation, long-context stress test, safety review, multilingual results, "
+    "and final committee decision. Explain which uses are approved, which are "
+    "excluded, why the 86% and 82% accuracy results should not be directly "
+    "combined, and identify two technical questions that the document cannot "
+    "answer without speculation. Cite evidence from different sections."
+)
 
 
 def _json_cache_default(value):
@@ -173,11 +182,19 @@ def _json_cache_default(value):
 def _save_demo_cache() -> None:
     """Persist user-visible demo state; runtime objects stay in memory/on disk."""
     payload = {
-        "version": 1,
+        "version": 2,
         "documents": st.session_state.get("documents", []),
         "comparison_results": st.session_state.get("comparison_results", {}),
         "evaluation_results": st.session_state.get("evaluation_results"),
         "chunking_mode": st.session_state.get("chunking_mode", "hierarchical"),
+        "workspace_questions": {
+            "baseline": st.session_state.get(
+                "baseline_workspace_question", DEFAULT_DEMO_QUESTION
+            ),
+            "agentic": st.session_state.get(
+                "agentic_workspace_question", DEFAULT_DEMO_QUESTION
+            ),
+        },
         "workspace_documents": {
             mode: resource.get("document_name")
             for mode, resource in st.session_state.get("workspace_resources", {}).items()
@@ -232,6 +249,13 @@ def _restore_demo_cache() -> None:
         st.session_state.comparison_results = cached.get(
             "comparison_results", {"baseline": None, "agentic": None}
         )
+        cached_questions = cached.get("workspace_questions", {})
+        for mode in ("baseline", "agentic"):
+            result = st.session_state.comparison_results.get(mode) or {}
+            st.session_state[f"{mode}_workspace_question"] = cached_questions.get(
+                mode,
+                result.get("question") or result.get("query") or DEFAULT_DEMO_QUESTION,
+            )
         st.session_state.evaluation_results = cached.get("evaluation_results")
         if EVALUATION_CACHE_PATH.exists():
             st.session_state.evaluation_results = json.loads(
@@ -307,6 +331,8 @@ def _clear_demo_state() -> None:
     st.session_state.parent_chunks = []
     st.session_state.child_chunks = []
     st.session_state.rag_initialized = False
+    st.session_state.baseline_workspace_question = DEFAULT_DEMO_QUESTION
+    st.session_state.agentic_workspace_question = DEFAULT_DEMO_QUESTION
     st.session_state.uploader_generation = st.session_state.get(
         "uploader_generation", 0
     ) + 1
@@ -363,6 +389,10 @@ def init_session_state():
         st.session_state.comparison_requested = False
     if 'evaluation_results' not in st.session_state:
         st.session_state.evaluation_results = None
+    if 'baseline_workspace_question' not in st.session_state:
+        st.session_state.baseline_workspace_question = DEFAULT_DEMO_QUESTION
+    if 'agentic_workspace_question' not in st.session_state:
+        st.session_state.agentic_workspace_question = DEFAULT_DEMO_QUESTION
 
     if 'workspace_resources' not in st.session_state:
         st.session_state.workspace_resources = {
@@ -1701,6 +1731,26 @@ def display_workspace_job_status():
         st.info(f"Preparing in background: {', '.join(running)}")
 
 
+def _workspace_document_payload(uploaded_file):
+    """Return the current upload or the persisted indexed document."""
+    if uploaded_file is not None:
+        return uploaded_file.getvalue(), uploaded_file.name
+
+    documents = st.session_state.get("documents", [])
+    if not documents:
+        return None, None
+
+    cached_path = Path(documents[0].get("path", ""))
+    if not cached_path.is_file():
+        return None, documents[0].get("name")
+    return cached_path.read_bytes(), documents[0].get("name") or cached_path.name
+
+
+def _persist_workspace_questions() -> None:
+    """Save text-area values immediately after either question changes."""
+    _save_demo_cache()
+
+
 def display_comparison_workspace(uploaded_file=None):
     """Two independent document-processing and question-answer workspaces."""
     st.subheader("RAG Workspace Comparison")
@@ -1709,8 +1759,12 @@ def display_comparison_workspace(uploaded_file=None):
         "quality checks, and response performance."
     )
 
-    if uploaded_file is None and not st.session_state.documents:
+    document_bytes, document_name = _workspace_document_payload(uploaded_file)
+
+    if document_bytes is None and not st.session_state.documents:
         st.info("Choose a document in the sidebar, then prepare each workspace below.")
+    elif uploaded_file is None and document_bytes is not None:
+        st.info(f"Using cached document: {document_name}")
 
     baseline_job = st.session_state.workspace_jobs.get("baseline")
     agentic_job = st.session_state.workspace_jobs.get("agentic")
@@ -1724,21 +1778,17 @@ def display_comparison_workspace(uploaded_file=None):
             st.markdown("### Baseline Workspace")
             st.caption("Vector retrieval → single LLM generation")
             st.markdown("**Document preparation**")
-            st.caption(
-                uploaded_file.name
-                if uploaded_file is not None
-                else "Choose a file in the sidebar."
-            )
+            st.caption(document_name or "Choose a file in the sidebar.")
             if st.button(
                 "Processing Baseline..." if baseline_processing else "Process Document for Baseline",
                 use_container_width=True,
                 key="process_baseline_workspace",
-                disabled=uploaded_file is None or baseline_processing,
+                disabled=document_bytes is None or baseline_processing,
             ):
                 _start_workspace_job(
                     "baseline",
-                    uploaded_file.getvalue(),
-                    uploaded_file.name,
+                    document_bytes,
+                    document_name,
                     st.session_state.chunking_mode,
                 )
                 st.rerun()
@@ -1755,6 +1805,7 @@ def display_comparison_workspace(uploaded_file=None):
                 "Baseline-only question",
                 height=88,
                 key="baseline_workspace_question",
+                on_change=_persist_workspace_questions,
             )
             if st.button(
                 "Run Baseline Only",
@@ -1776,22 +1827,18 @@ def display_comparison_workspace(uploaded_file=None):
             st.markdown("### Agentic Workspace")
             st.caption("Planning → hybrid retrieval → validation → review")
             st.markdown("**Document preparation**")
-            st.caption(
-                uploaded_file.name
-                if uploaded_file is not None
-                else "Choose a file in the sidebar."
-            )
+            st.caption(document_name or "Choose a file in the sidebar.")
             if st.button(
                 "Processing Agentic..." if agentic_processing else "Process Document for Agentic",
                 type="primary",
                 use_container_width=True,
                 key="process_agentic_workspace",
-                disabled=uploaded_file is None or agentic_processing,
+                disabled=document_bytes is None or agentic_processing,
             ):
                 _start_workspace_job(
                     "agentic",
-                    uploaded_file.getvalue(),
-                    uploaded_file.name,
+                    document_bytes,
+                    document_name,
                     st.session_state.chunking_mode,
                 )
                 st.rerun()
@@ -1807,6 +1854,7 @@ def display_comparison_workspace(uploaded_file=None):
                 "Agentic-only question",
                 height=88,
                 key="agentic_workspace_question",
+                on_change=_persist_workspace_questions,
             )
             if st.button(
                 "Run Agentic Only",
