@@ -94,6 +94,14 @@ class SimpleEvaluator:
             scores['context_usage_rate'] * 0.25 +
             scores['final_score'] * 0.25
         )
+
+        # This excludes Agentic-only critic review, so it is safe for a
+        # like-for-like Baseline vs Agentic comparison.
+        scores['comparative_score'] = (
+            scores['has_citations'] +
+            scores['is_substantial'] +
+            scores['context_usage_rate']
+        ) / 3
         
         return scores
 
@@ -138,6 +146,9 @@ class SimpleEvaluator:
             'avg_quality_score': sum(s['final_score'] for s in all_scores) / len(all_scores),
             'improvement_rate': sum(s['was_improved'] for s in all_scores) / len(all_scores),
             'avg_overall': sum(s['overall'] for s in all_scores) / len(all_scores),
+            'avg_comparative_score': (
+                sum(s['comparative_score'] for s in all_scores) / len(all_scores)
+            ),
             'detailed_scores': all_scores
         }
         

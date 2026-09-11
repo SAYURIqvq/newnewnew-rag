@@ -2118,62 +2118,114 @@ def display_statistics():
         
         st.divider()
 def _display_cached_evaluation(evaluation_cache: dict) -> None:
-    """Render a completed evaluation from live or restored state."""
-    results = evaluation_cache["results"]
-    workflow_rows = evaluation_cache["workflow_rows"]
+    """Render a completed, like-for-like Baseline versus Agentic evaluation."""
+    if "baseline_results" not in evaluation_cache:
+        st.warning(
+            "This cached evaluation was created by the earlier Agentic-only evaluator. "
+            "Run the updated evaluation to produce a Baseline versus Agentic comparison."
+        )
+        return
+
+    baseline = evaluation_cache["baseline_results"]
+    agentic = evaluation_cache["agentic_results"]
+    baseline_rows = evaluation_cache["baseline_rows"]
+    agentic_rows = evaluation_cache["agentic_rows"]
+    test_cases = evaluation_cache.get("test_cases", [])
+
     st.success(
-        "Evaluation results restored from cache."
+        "Baseline versus Agentic evaluation restored from cache."
         if evaluation_cache.get("restored")
-        else "Full Agentic Workflow Evaluation Complete!"
+        else "Baseline versus Agentic evaluation complete."
     )
     st.caption(
         f"Dataset: {evaluation_cache.get('dataset', 'Unknown')} | "
-        f"Questions: {evaluation_cache.get('question_count', len(workflow_rows))} | "
+        f"Questions: {evaluation_cache.get('question_count', len(agentic_rows))} | "
         f"Completed: {evaluation_cache.get('completed_at', 'Unknown')}"
     )
-    st.markdown("### Current Agentic Evaluation")
-    st.caption(
-        "These are heuristic scores for the current 8-question evaluation set, "
-        "not dissertation benchmark accuracy."
+    st.info(
+        "Both workflows answer the same questions against separately prepared copies "
+        "of the same document. Common heuristic metrics exclude Agentic-only validation "
+        "and critic scores, so they can be compared fairly. These are not thesis benchmark accuracy."
     )
-    col1, col2, col3, col4 = st.columns(4)
-    with col1:
-        score = float(results["avg_overall"])
-        color = "Green" if score >= 0.7 else "Amber" if score >= 0.5 else "Red"
-        st.metric("Overall Heuristic Score", f"{score:.1%}", help=f"Status: {color}")
-    with col2:
-        st.metric("Citation Rate", f"{float(results['avg_citation_rate']):.1%}")
-    with col3:
-        st.metric("Context Usage", f"{float(results['avg_context_usage']):.1%}")
-    with col4:
-        st.metric(
-            "Regeneration Rate",
-            f"{float(results['improvement_rate']):.1%}",
-            help="Percentage of answers that required an additional rewrite.",
-        )
 
-    col5, col6 = st.columns(2)
-    with col5:
-        st.metric("Avg Quality Score", f"{float(results['avg_quality_score']):.1%}")
-    with col6:
-        st.metric("Avg Word Count", f"{float(results['avg_word_count']):.0f}")
+    def percent_delta(metric: str) -> str:
+        delta = float(agentic[metric]) - float(baseline[metric])
+        return f"{delta * 100:+.1f} pp"
 
-    st.markdown("### Detailed Results")
-    import pandas as pd
+    def latency_delta() -> str:
+        delta = float(agentic["avg_latency_seconds"]) - float(baseline["avg_latency_seconds"])
+        return f"{delta:+.2f}s"
 
-    rows = []
-    for row_idx, score in enumerate(results["detailed_scores"]):
-        workflow_row = workflow_rows[row_idx]
-        rows.append({
-            "Question": score["query"][:50] + "...",
-            "Strategy": workflow_row["strategy"],
-            "Heuristic": f"{float(score['overall']):.1%}",
-            "Citations": "Pass" if score["has_citations"] else "Fail",
-            "Validation": f"{float(workflow_row['validation_score']):.1%}",
-            "Critic": f"{float(workflow_row['critic_score']):.1%}",
-            "Reliable": "Pass" if workflow_row["reliability_passed"] else "Fail",
+    st.markdown("### Comparative Summary")
+    summary_rows = [
+        {
+            "Metric": "Common heuristic score",
+            "Baseline": f"{float(baseline['avg_comparative_score']):.1%}",
+            "Agentic": f"{float(agentic['avg_comparative_score']):.1%}",
+            "Difference": percent_delta("avg_comparative_score"),
+        },
+        {
+            "Metric": "Citation rate",
+            "Baseline": f"{float(baseline['avg_citation_rate']):.1%}",
+            "Agentic": f"{float(agentic['avg_citation_rate']):.1%}",
+            "Difference": percent_delta("avg_citation_rate"),
+        },
+        {
+            "Metric": "Retrieved-context usage",
+            "Baseline": f"{float(baseline['avg_context_usage']):.1%}",
+            "Agentic": f"{float(agentic['avg_context_usage']):.1%}",
+            "Difference": percent_delta("avg_context_usage"),
+        },
+        {
+            "Metric": "Average answer length",
+            "Baseline": f"{float(baseline['avg_word_count']):.0f} words",
+            "Agentic": f"{float(agentic['avg_word_count']):.0f} words",
+            "Difference": f"{float(agentic['avg_word_count']) - float(baseline['avg_word_count']):+.0f} words",
+        },
+        {
+            "Metric": "Average end-to-end latency",
+            "Baseline": f"{float(baseline['avg_latency_seconds']):.2f}s",
+            "Agentic": f"{float(agentic['avg_latency_seconds']):.2f}s",
+            "Difference": latency_delta(),
+        },
+    ]
+    st.dataframe(summary_rows, use_container_width=True, hide_index=True)
+
+    control_left, control_right = st.columns(2)
+    with control_left:
+        st.markdown("### Baseline Path")
+        st.metric("Workflow", "Vector retrieval + one Writer call")
+        st.metric("Validation / Critic", "Not included")
+    with control_right:
+        st.markdown("### Agentic Controls")
+        st.metric("Validation score", f"{float(agentic['avg_validation_score']):.1%}")
+        st.metric("Critic score", f"{float(agentic['avg_critic_score']):.1%}")
+        st.metric("Regeneration rate", f"{float(agentic['improvement_rate']):.1%}")
+
+    st.markdown("### Question Level Comparison")
+    detail_rows = []
+    for index, (baseline_score, agentic_score) in enumerate(zip(
+        baseline["detailed_scores"], agentic["detailed_scores"]
+    )):
+        baseline_row = baseline_rows[index]
+        agentic_row = agentic_rows[index]
+        case = test_cases[index] if index < len(test_cases) else {}
+        detail_rows.append({
+            "Question": baseline_score["query"][:54] + "...",
+            "Category": case.get("category", "general"),
+            "Baseline": f"{float(baseline_score['comparative_score']):.1%}",
+            "Agentic": f"{float(agentic_score['comparative_score']):.1%}",
+            "Delta": f"{(float(agentic_score['comparative_score']) - float(baseline_score['comparative_score'])) * 100:+.1f} pp",
+            "Baseline citations": "Pass" if baseline_score["has_citations"] else "Fail",
+            "Agentic citations": "Pass" if agentic_score["has_citations"] else "Fail",
+            "Baseline latency": f"{baseline_row['latency_seconds']:.2f}s",
+            "Agentic latency": f"{agentic_row['latency_seconds']:.2f}s",
+            "Agentic strategy": agentic_row["strategy"],
+            "Validation": f"{agentic_row['validation_score']:.1%}",
+            "Critic": f"{agentic_row['critic_score']:.1%}",
+            "Rounds": agentic_row["retrieval_rounds"],
         })
-    st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+    st.dataframe(detail_rows, use_container_width=True, hide_index=True)
 
 
 def display_evaluation_interface():
@@ -2181,13 +2233,15 @@ def display_evaluation_interface():
     
     st.subheader("System Evaluation")
     
-    if not st.session_state.documents:
-        st.info("Upload documents first to run evaluation")
+    baseline_workspace = st.session_state.workspace_resources["baseline"]
+    agentic_workspace = st.session_state.workspace_resources["agentic"]
+    if not (baseline_workspace.get("ready") and agentic_workspace.get("ready")):
+        st.info("Prepare the same document in both Baseline and Agentic workspaces before evaluation.")
         return
     
     st.markdown("""
-    **Current evaluation checks:** citation presence, retrieved-context usage,
-    answer completeness, validation, critic review, and regeneration.
+    **Comparison checks:** citation presence, retrieved-context usage, answer completeness,
+    end-to-end latency, plus Agentic-only validation, critic review, and regeneration.
     """)
     
     # Load test questions
@@ -2215,15 +2269,18 @@ def display_evaluation_interface():
         test_data = json.load(f)
 
     if "questions" in test_data:
-        questions = test_data.get("questions", [])
+        test_cases = [
+            {"question": question, "category": "general", "difficulty": "unspecified"}
+            for question in test_data.get("questions", []) if question
+        ]
     elif "test_cases" in test_data:
-        questions = [
-            case.get("question", "")
-            for case in test_data.get("test_cases", [])
-            if case.get("question")
+        test_cases = [
+            case for case in test_data.get("test_cases", []) if case.get("question")
         ]
     else:
-        questions = []
+        test_cases = []
+
+    questions = [case["question"] for case in test_cases]
 
     if not questions:
         st.warning(f"No questions found in test file: {test_file}")
@@ -2238,6 +2295,7 @@ def display_evaluation_interface():
     
     # Run evaluation button
     if st.button("🚀 Run Evaluation", type="primary"):
+        import time
         from src.evaluation.simple_evaluator import SimpleEvaluator
         from src.config import get_settings
         from src.llm.chat_model import create_chat_model
@@ -2252,6 +2310,7 @@ def display_evaluation_interface():
         from src.retrieval.vector_search import VectorSearchAgent
         from src.retrieval.keyword_search import KeywordSearchAgent
         from src.retrieval.graph_search import GraphSearchAgent
+        from src.baselines.naive_rag import NaiveRAG
 
         if not _llm_api_key_ok():
             st.error(
@@ -2259,29 +2318,44 @@ def display_evaluation_interface():
             )
             return
 
-        evaluator = SimpleEvaluator()
+        baseline_evaluator = SimpleEvaluator()
+        agentic_evaluator = SimpleEvaluator()
 
-        with st.spinner("Initializing complete Agentic RAG workflow..."):
+        with st.spinner("Initializing matched Baseline and Agentic workflows..."):
             settings = get_settings()
-            planner_llm = create_chat_model(settings, model=settings.get_agent_model("planner"))
-            decomposer_llm = create_chat_model(settings, model=settings.get_agent_model("decomposer"), max_tokens=1000)
-            validator_llm = create_chat_model(settings, model=settings.get_agent_model("validator"))
-            writer_llm = create_chat_model(settings, model=settings.get_agent_model("writer"))
-            critic_llm = create_chat_model(settings, model=settings.get_agent_model("critic"))
+            active_role = st.session_state.get("active_role", "admin")
+            baseline_workspace["vector_store"].set_access_role(active_role)
+            agentic_workspace["vector_store"].set_access_role(active_role)
+            baseline_llm = create_chat_model(
+                settings, model=settings.get_agent_model("writer"), max_tokens=320,
+            )
+            planner_llm = create_chat_model(settings, model=settings.get_agent_model("planner"), max_tokens=220)
+            decomposer_llm = create_chat_model(settings, model=settings.get_agent_model("decomposer"), max_tokens=260)
+            validator_llm = create_chat_model(settings, model=settings.get_agent_model("validator"), max_tokens=220)
+            writer_llm = create_chat_model(settings, model=settings.get_agent_model("writer"), max_tokens=320)
+            critic_llm = create_chat_model(settings, model=settings.get_agent_model("critic"), max_tokens=300)
+
+            baseline_rag = NaiveRAG(
+                vector_store=baseline_workspace["vector_store"],
+                embedder=st.session_state.embedder,
+                writer=WriterAgent(llm=baseline_llm),
+            )
 
             vector_agent = VectorSearchAgent(
-                vector_store=st.session_state.vector_store,
+                vector_store=agentic_workspace["vector_store"],
                 embedder=st.session_state.embedder,
             )
             keyword_agent = KeywordSearchAgent(
-                vector_store=st.session_state.vector_store,
+                vector_store=agentic_workspace["vector_store"],
+                index_path="data/bm25_agentic_index.pkl",
+                access_role=active_role,
             )
             graph_agent = (
                 GraphSearchAgent(
-                    knowledge_graph=st.session_state.knowledge_graph,
-                    vector_store=st.session_state.vector_store,
+                    knowledge_graph=agentic_workspace["knowledge_graph"],
+                    vector_store=agentic_workspace["vector_store"],
                 )
-                if st.session_state.knowledge_graph
+                if agentic_workspace["knowledge_graph"]
                 else None
             )
 
@@ -2296,29 +2370,40 @@ def display_evaluation_interface():
                 decomposer=QueryDecomposer(llm=decomposer_llm),
                 coordinator=coordinator,
                 validator=ValidatorAgent(llm=validator_llm),
-                synthesis=SynthesisAgent(),
+                synthesis=SynthesisAgent(
+                    use_local_reranker=st.session_state.get("local_reranker_enabled", False)
+                ),
                 writer=WriterAgent(llm=writer_llm),
                 critic=CriticAgent(llm=critic_llm, quality_threshold=0.7),
             )
 
-        # Process each question
-        all_answers = []
-        all_chunks_list = []
-        all_metadata = []
-        all_workflow_rows = []
+        baseline_answers, baseline_chunks, baseline_metadata, baseline_rows = [], [], [], []
+        agentic_answers, agentic_chunks, agentic_metadata, agentic_rows = [], [], [], []
         
         progress_bar = st.progress(0)
         status_text = st.empty()
         
         for i, question in enumerate(questions):
-            status_text.text(f"Running full Agentic workflow {i+1}/{len(questions)}...")
+            status_text.text(f"Baseline {i+1}/{len(questions)}: {question[:55]}")
+            baseline_started = time.perf_counter()
+            baseline_result = baseline_rag.run(question)
+            baseline_latency = time.perf_counter() - baseline_started
+            baseline_answers.append(baseline_result.answer or "")
+            baseline_chunks.append(baseline_result.chunks)
+            baseline_metadata.append({"self_reflection": {"iterations": 0, "improved": False}})
+            baseline_rows.append({
+                "latency_seconds": baseline_latency,
+                "chunk_count": len(baseline_result.chunks),
+            })
 
+            status_text.text(f"Agentic {i+1}/{len(questions)}: {question[:55]}")
+            agentic_started = time.perf_counter()
             result = workflow.run(question)
-
-            # Store results
-            all_answers.append(result.answer or "")
-            all_chunks_list.append(result.chunks)
-            all_metadata.append({
+            agentic_latency = time.perf_counter() - agentic_started
+            result.answer = _clean_agentic_answer(result.answer, max_words=260)
+            agentic_answers.append(result.answer or "")
+            agentic_chunks.append(result.chunks)
+            agentic_metadata.append({
                 "self_reflection": {
                     "iterations": result.metadata.get("regeneration_count", 0),
                     "final_score": result.critic_score or 0.0,
@@ -2330,7 +2415,7 @@ def display_evaluation_interface():
                     "improved": result.metadata.get("regeneration_count", 0) > 0,
                 }
             })
-            all_workflow_rows.append({
+            agentic_rows.append({
                 "strategy": (
                     result.strategy.value
                     if hasattr(result.strategy, "value")
@@ -2341,6 +2426,7 @@ def display_evaluation_interface():
                 "critic_score": result.critic_score or 0.0,
                 "reliability_passed": result.metadata.get("reliability_gate", {}).get("passed"),
                 "chunk_count": len(result.chunks),
+                "latency_seconds": agentic_latency,
             })
             
             progress_bar.progress((i + 1) / len(questions))
@@ -2348,14 +2434,32 @@ def display_evaluation_interface():
         status_text.empty()
         progress_bar.empty()
         
-        # Evaluate
-        results = evaluator.evaluate_batch(
-            questions, all_answers, all_chunks_list, all_metadata
+        baseline_results = baseline_evaluator.evaluate_batch(
+            questions, baseline_answers, baseline_chunks, baseline_metadata
         )
+        agentic_results = agentic_evaluator.evaluate_batch(
+            questions, agentic_answers, agentic_chunks, agentic_metadata
+        )
+        baseline_results["avg_latency_seconds"] = sum(
+            row["latency_seconds"] for row in baseline_rows
+        ) / len(baseline_rows)
+        agentic_results["avg_latency_seconds"] = sum(
+            row["latency_seconds"] for row in agentic_rows
+        ) / len(agentic_rows)
+        agentic_results["avg_validation_score"] = sum(
+            row["validation_score"] for row in agentic_rows
+        ) / len(agentic_rows)
+        agentic_results["avg_critic_score"] = sum(
+            row["critic_score"] for row in agentic_rows
+        ) / len(agentic_rows)
         
         st.session_state.evaluation_results = {
-            "results": results,
-            "workflow_rows": all_workflow_rows,
+            "schema_version": 3,
+            "baseline_results": baseline_results,
+            "agentic_results": agentic_results,
+            "baseline_rows": baseline_rows,
+            "agentic_rows": agentic_rows,
+            "test_cases": test_cases,
             "dataset": str(test_file),
             "document_name": (
                 st.session_state.documents[0].get("name")
