@@ -9,6 +9,7 @@ Supports all strategies: SIMPLE, MULTIHOP, GRAPH
 """
 
 from typing import Dict, Any, Literal, TypedDict
+import time
 from langgraph.graph import StateGraph, END
 
 from src.models.agent_state import AgentState, Strategy
@@ -494,47 +495,61 @@ class CompleteAgenticRAGWorkflow:
             return "finish"
     
     # ========== LANGGRAPH WRAPPERS ==========
+
+    @staticmethod
+    def _record_stage_timing(state: AgentState, stage: str, started_at: float) -> AgentState:
+        """Accumulate per-stage timings for local observability and debugging."""
+        timings = state.metadata.setdefault("stage_timings", {})
+        timings[stage] = round(timings.get(stage, 0.0) + time.perf_counter() - started_at, 4)
+        return state
     
     def _planner_node_wrapper(self, state: dict) -> dict:
         """LangGraph wrapper for planner node."""
         agent_state = state["agent_state"]
-        updated_state = self._planner_node(agent_state)
+        started_at = time.perf_counter()
+        updated_state = self._record_stage_timing(self._planner_node(agent_state), "planner", started_at)
         return {"agent_state": updated_state}
     
     def _decomposer_node_wrapper(self, state: dict) -> dict:
         """LangGraph wrapper for decomposer node."""
         agent_state = state["agent_state"]
-        updated_state = self._decomposer_node(agent_state)
+        started_at = time.perf_counter()
+        updated_state = self._record_stage_timing(self._decomposer_node(agent_state), "decomposer", started_at)
         return {"agent_state": updated_state}
     
     def _retrieval_node_wrapper(self, state: dict) -> dict:
         """LangGraph wrapper for retrieval node."""
         agent_state = state["agent_state"]
-        updated_state = self._retrieval_node(agent_state)
+        started_at = time.perf_counter()
+        updated_state = self._record_stage_timing(self._retrieval_node(agent_state), "retrieval", started_at)
         return {"agent_state": updated_state}
     
     def _validator_node_wrapper(self, state: dict) -> dict:
         """LangGraph wrapper for validator node."""
         agent_state = state["agent_state"]
-        updated_state = self._validator_node(agent_state)
+        started_at = time.perf_counter()
+        updated_state = self._record_stage_timing(self._validator_node(agent_state), "validator", started_at)
         return {"agent_state": updated_state}
     
     def _synthesis_node_wrapper(self, state: dict) -> dict:
         """LangGraph wrapper for synthesis node."""
         agent_state = state["agent_state"]
-        updated_state = self._synthesis_node(agent_state)
+        started_at = time.perf_counter()
+        updated_state = self._record_stage_timing(self._synthesis_node(agent_state), "synthesis", started_at)
         return {"agent_state": updated_state}
     
     def _writer_node_wrapper(self, state: dict) -> dict:
         """LangGraph wrapper for writer node."""
         agent_state = state["agent_state"]
-        updated_state = self._writer_node(agent_state)
+        started_at = time.perf_counter()
+        updated_state = self._record_stage_timing(self._writer_node(agent_state), "writer", started_at)
         return {"agent_state": updated_state}
     
     def _critic_node_wrapper(self, state: dict) -> dict:
         """LangGraph wrapper for critic node."""
         agent_state = state["agent_state"]
-        updated_state = self._critic_node(agent_state)
+        started_at = time.perf_counter()
+        updated_state = self._record_stage_timing(self._critic_node(agent_state), "critic", started_at)
         return {"agent_state": updated_state}
     
     def _should_retry_retrieval_wrapper(self, state: dict) -> Literal["retry", "proceed"]:

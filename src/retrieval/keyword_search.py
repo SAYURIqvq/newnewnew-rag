@@ -39,7 +39,8 @@ class KeywordSearchAgent(BaseAgent):
     def __init__(
         self,
         vector_store: ChromaVectorStore,
-        index_path: str = "data/bm25_index.pkl"
+        index_path: str = "data/bm25_index.pkl",
+        access_role: str = "admin",
     ):
         """
         Initialize Keyword Search Agent.
@@ -51,6 +52,7 @@ class KeywordSearchAgent(BaseAgent):
         super().__init__(name="keyword_search", version="1.0.0")
         
         self.vector_store = vector_store
+        self.access_role = (access_role or "admin").lower()
         self.bm25_index = BM25Index(index_path=index_path)
         
         expected_chunks = self._current_chunk_count()
@@ -99,7 +101,7 @@ class KeywordSearchAgent(BaseAgent):
                 return state
             
             # Search BM25 index
-            results = self.bm25_index.search(query, top_k=10)
+            results = self._filter_access(self.bm25_index.search(query, top_k=30))[:10]
             
             # Convert to Chunk objects
             chunks = []
@@ -150,7 +152,7 @@ class KeywordSearchAgent(BaseAgent):
                 return []
             
             # Search
-            results = self.bm25_index.search(query, top_k=top_k)
+            results = self._filter_access(self.bm25_index.search(query, top_k=max(top_k * 3, 20)))[:top_k]
             
             # Convert to chunks
             chunks = []
@@ -174,6 +176,16 @@ class KeywordSearchAgent(BaseAgent):
         except Exception as e:
             self.log(f"Async keyword search failed: {str(e)}", level="error")
             return []
+
+    def _filter_access(self, results: List[dict]) -> List[dict]:
+        """Apply the same simulated role scope used by vector retrieval."""
+        if self.access_role == "admin":
+            return results
+        allowed = {"shared", self.access_role}
+        return [
+            result for result in results
+            if (result.get("metadata") or {}).get("access_role", "shared") in allowed
+        ]
     
     def rebuild_index(self) -> None:
         """

@@ -148,7 +148,9 @@ class RetrievalCoordinator(BaseAgent):
             
             # Step 2: Deduplicate
             # Keep evidence found in earlier hops while adding the new round.
-            unique_chunks = self._deduplicate(previous_chunks + all_results)
+            retrieval_candidates = previous_chunks + all_results
+            self._annotate_rrf_scores(retrieval_candidates)
+            unique_chunks = self._deduplicate(retrieval_candidates)
             
             self.log(
                 f"Deduplication: {len(all_results)} → {len(unique_chunks)} unique chunks",
@@ -176,6 +178,7 @@ class RetrievalCoordinator(BaseAgent):
                 "parallel": self.parallel,
                 "query_count": len(retrieval_queries),
                 "query_breakdown": query_metadata,
+                "fusion": "rrf",
             }
             
             return state
@@ -330,9 +333,31 @@ class RetrievalCoordinator(BaseAgent):
                 reverse=True
             )
             # Keep highest scored
-            unique_chunks.append(sorted_group[0])
+            representative = sorted_group[0]
+            sources = sorted({c.metadata.get("source", "unknown") for c in group})
+            representative.metadata["retrieval_sources"] = sources
+            representative.metadata["rrf_score"] = sum(
+                c.metadata.get("rrf_component", 0.0) for c in group
+            )
+            unique_chunks.append(representative)
         
         return unique_chunks
+
+    def _annotate_rrf_scores(self, chunks: List[Chunk], k: int = 60) -> None:
+        """Annotate candidates with Reciprocal Rank Fusion components.
+
+        Each retrieval channel ranks its own results. RRF makes those ranks
+        comparable without assuming vector, BM25, and graph scores share a
+        numerical scale.
+        """
+        by_source: Dict[str, List[Chunk]] = defaultdict(list)
+        for chunk in chunks:
+            by_source[chunk.metadata.get("source", "unknown")].append(chunk)
+        for source_chunks in by_source.values():
+            source_chunks.sort(key=self._calibrated_score, reverse=True)
+            for rank, chunk in enumerate(source_chunks, 1):
+                chunk.metadata["source_rank"] = rank
+                chunk.metadata["rrf_component"] = 1.0 / (k + rank)
     
     def _hash_content(self, text: str) -> str:
         """
@@ -378,8 +403,8 @@ class RetrievalCoordinator(BaseAgent):
         # scores are normalized, so raw sorting lets keyword retrieval dominate.
         sorted_chunks = sorted(
             chunks,
-            key=self._calibrated_score,
-            reverse=True
+            key=lambda chunk: chunk.metadata.get("rrf_score", self._calibrated_score(chunk)),
+            reverse=True,
         )
         
         # Return top-k

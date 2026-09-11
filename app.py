@@ -187,6 +187,13 @@ def _save_demo_cache() -> None:
         "comparison_results": st.session_state.get("comparison_results", {}),
         "evaluation_results": st.session_state.get("evaluation_results"),
         "chunking_mode": st.session_state.get("chunking_mode", "hierarchical"),
+        "enterprise_settings": {
+            "active_role": st.session_state.get("active_role", "admin"),
+            "document_access_role": st.session_state.get("document_access_role", "shared"),
+            "document_department": st.session_state.get("document_department", "general"),
+            "document_version": st.session_state.get("document_version", "v1"),
+            "local_reranker_enabled": st.session_state.get("local_reranker_enabled", False),
+        },
         "workspace_questions": {
             "baseline": st.session_state.get(
                 "baseline_workspace_question", DEFAULT_DEMO_QUESTION
@@ -194,6 +201,7 @@ def _save_demo_cache() -> None:
             "agentic": st.session_state.get(
                 "agentic_workspace_question", DEFAULT_DEMO_QUESTION
             ),
+            "routed": st.session_state.get("routed_workspace_question", ""),
         },
         "workspace_documents": {
             mode: resource.get("document_name")
@@ -229,6 +237,8 @@ def _clear_evaluation_cache() -> None:
     st.session_state.evaluation_results = None
     if EVALUATION_CACHE_PATH.exists():
         EVALUATION_CACHE_PATH.unlink()
+    from src.monitoring.sqlite_trace_store import SQLiteTraceStore
+    SQLiteTraceStore().clear()
 
 
 def _restore_demo_cache() -> None:
@@ -250,12 +260,22 @@ def _restore_demo_cache() -> None:
             "comparison_results", {"baseline": None, "agentic": None}
         )
         cached_questions = cached.get("workspace_questions", {})
+        enterprise_settings = cached.get("enterprise_settings", {})
+        for key, default in {
+            "active_role": "admin",
+            "document_access_role": "shared",
+            "document_department": "general",
+            "document_version": "v1",
+            "local_reranker_enabled": False,
+        }.items():
+            st.session_state[key] = enterprise_settings.get(key, default)
         for mode in ("baseline", "agentic"):
             result = st.session_state.comparison_results.get(mode) or {}
             st.session_state[f"{mode}_workspace_question"] = cached_questions.get(
                 mode,
                 result.get("question") or result.get("query") or DEFAULT_DEMO_QUESTION,
             )
+        st.session_state.routed_workspace_question = cached_questions.get("routed", "")
         st.session_state.evaluation_results = cached.get("evaluation_results")
         if EVALUATION_CACHE_PATH.exists():
             st.session_state.evaluation_results = json.loads(
@@ -333,6 +353,8 @@ def _clear_demo_state() -> None:
     st.session_state.rag_initialized = False
     st.session_state.baseline_workspace_question = DEFAULT_DEMO_QUESTION
     st.session_state.agentic_workspace_question = DEFAULT_DEMO_QUESTION
+    st.session_state.routed_workspace_question = ""
+    st.session_state.routed_result = None
     st.session_state.uploader_generation = st.session_state.get(
         "uploader_generation", 0
     ) + 1
@@ -393,6 +415,20 @@ def init_session_state():
         st.session_state.baseline_workspace_question = DEFAULT_DEMO_QUESTION
     if 'agentic_workspace_question' not in st.session_state:
         st.session_state.agentic_workspace_question = DEFAULT_DEMO_QUESTION
+    if 'routed_workspace_question' not in st.session_state:
+        st.session_state.routed_workspace_question = ""
+    if 'routed_result' not in st.session_state:
+        st.session_state.routed_result = None
+    if 'active_role' not in st.session_state:
+        st.session_state.active_role = "admin"
+    if 'document_access_role' not in st.session_state:
+        st.session_state.document_access_role = "shared"
+    if 'document_department' not in st.session_state:
+        st.session_state.document_department = "general"
+    if 'document_version' not in st.session_state:
+        st.session_state.document_version = "v1"
+    if 'local_reranker_enabled' not in st.session_state:
+        st.session_state.local_reranker_enabled = False
 
     if 'workspace_resources' not in st.session_state:
         st.session_state.workspace_resources = {
@@ -506,6 +542,38 @@ def sidebar():
         st.markdown("**Chunking**")
         st.caption("Hierarchical (Parent-Child)")
         st.info("📈 Parents: 2000 tokens | Children: 500 tokens")
+        with st.expander("Local enterprise controls", expanded=False):
+            st.selectbox(
+                "Query role",
+                ["admin", "engineering", "hr", "finance"],
+                key="active_role",
+                help="Local RBAC simulation. Admin can search every indexed document.",
+                on_change=_save_demo_cache,
+            )
+            st.selectbox(
+                "Document access role",
+                ["shared", "engineering", "hr", "finance"],
+                key="document_access_role",
+                help="Applied when the document is processed. Reprocess after changing it.",
+                on_change=_save_demo_cache,
+            )
+            st.text_input(
+                "Department",
+                key="document_department",
+                on_change=_save_demo_cache,
+            )
+            st.text_input(
+                "Document version",
+                key="document_version",
+                on_change=_save_demo_cache,
+            )
+            st.toggle(
+                "Use local Cross-Encoder reranker",
+                key="local_reranker_enabled",
+                help="Downloads a small local model on first use; disabled by default.",
+                on_change=_save_demo_cache,
+            )
+            st.caption("Role metadata is enforced before retrieval. This is a single-machine RBAC prototype, not production IAM.")
         
         st.divider()
 
@@ -564,6 +632,11 @@ def sidebar():
                             f"{doc['pages']} pages • "
                             f"{doc['chunks']} chunks"
                         )
+                    st.caption(
+                        f"Access: {doc.get('access_role', 'shared')} | "
+                        f"Dept: {doc.get('department', 'general')} | "
+                        f"Version: {doc.get('document_version', 'v1')}"
+                    )
                 
                 with col2:
                     if st.button("🗑️", key=f"delete_{i}", help="Delete document"):
@@ -1039,6 +1112,18 @@ def _append_assistant_response(
         cache_hit=False,
     )
 
+    from src.monitoring.sqlite_trace_store import SQLiteTraceStore
+    SQLiteTraceStore().record(
+        query=query,
+        mode=rag_mode,
+        role=workflow_metadata.get("active_role", st.session_state.get("active_role", "admin")),
+        strategy=strategy_label,
+        latency_seconds=latency,
+        chunks_used=len(result.chunks),
+        citations=len(citations),
+        metadata=workflow_metadata,
+    )
+
     print(f"⏱️  Total latency: {latency:.2f}s | mode={rag_mode}")
     print("=" * 60 + "\n")
     return assistant_message
@@ -1078,6 +1163,9 @@ def process_user_query(
     if not workspace.get("ready") or not vector_store:
         st.error(f"Process the document in the {rag_mode.title()} workspace first.")
         return
+
+    active_role = st.session_state.get("active_role", "admin")
+    vector_store.set_access_role(active_role)
 
     if not _llm_api_key_ok():
         st.error(
@@ -1126,6 +1214,8 @@ def process_user_query(
                 "rag_mode": "baseline",
                 "method": "naive_rag",
                 "chunks_used": len(result.chunks),
+                "active_role": active_role,
+                "stage_timings": {"baseline_total": round(time.time() - start_time, 4)},
             },
             strategy_label="naive_baseline",
             record_in_chat=record_in_chat,
@@ -1165,7 +1255,9 @@ def process_user_query(
         )
         
         keyword_agent = KeywordSearchAgent(
-            vector_store=vector_store
+            vector_store=vector_store,
+            index_path=f"data/bm25_{rag_mode}_index.pkl",
+            access_role=active_role,
         )
         
         graph_agent = GraphSearchAgent(
@@ -1180,7 +1272,9 @@ def process_user_query(
         )
         
         validator = ValidatorAgent(llm=validator_llm)
-        synthesis = SynthesisAgent()
+        synthesis = SynthesisAgent(
+            use_local_reranker=st.session_state.get("local_reranker_enabled", False)
+        )
         writer = WriterAgent(llm=writer_llm)
         critic = CriticAgent(
             llm=critic_llm,
@@ -1270,6 +1364,8 @@ def process_user_query(
             "initial_critic_score": result.metadata.get("initial_critic_score"),
             "regenerations": result.metadata.get("regeneration_count", 0),
             "decision": critic_decision,
+            "active_role": active_role,
+            "stage_timings": result.metadata.get("stage_timings", {}),
         },
         strategy_label=strategy_val,
         record_in_chat=record_in_chat,
@@ -1283,6 +1379,53 @@ def _run_workspace_query(mode: str, query: str):
         record_in_chat=False,
         rag_mode_override=mode,
     )
+
+
+def _run_routed_query(query: str):
+    """Use the Planner's complexity assessment to dispatch a local RAG path."""
+    from src.agents.planner import PlannerAgent
+    from src.config import get_settings
+    from src.llm.chat_model import create_chat_model
+    from src.models.agent_state import AgentState
+    from src.routing.query_router import decide_route
+
+    if not _llm_api_key_ok():
+        st.error("Set a valid OPENROUTER_API_KEY in `.env`, then refresh and try again.")
+        return None, None
+
+    settings = get_settings()
+    planner = PlannerAgent(
+        llm=create_chat_model(
+            settings, model=settings.get_agent_model("planner"), max_tokens=220
+        )
+    )
+    planned = planner.run(AgentState(query=query))
+    decision = decide_route(query, planned.strategy)
+    if decision.route == "refuse":
+        message = {
+            "role": "assistant",
+            "content": (
+                "This local demo routes high-risk requests to human review rather "
+                "than generating an automated answer."
+            ),
+            "citations": [],
+            "workflow_metadata": {
+                "rag_mode": "refuse",
+                "strategy": _format_strategy_label(planned.strategy),
+                "complexity": planned.complexity,
+                "routing_reason": decision.reason,
+            },
+        }
+        return decision, message
+
+    message = _run_workspace_query(decision.route, query)
+    if message:
+        message.setdefault("workflow_metadata", {}).update({
+            "routing_reason": decision.reason,
+            "route": decision.route,
+            "planner_complexity": planned.complexity,
+        })
+    return decision, message
 
 
 def _store_comparison_result(mode: str, query: str, message):
@@ -1684,6 +1827,11 @@ def _start_workspace_job(
             mode=mode,
             chunking_mode=chunking_mode,
             embedder=st.session_state.embedder,
+            access_profile={
+                "access_role": st.session_state.document_access_role,
+                "department": st.session_state.document_department.strip() or "general",
+                "document_version": st.session_state.document_version.strip() or "v1",
+            },
         )
     )
 
@@ -1873,6 +2021,52 @@ def display_comparison_workspace(uploaded_file=None):
 
     st.divider()
     display_automatic_comparison()
+
+    st.divider()
+    st.markdown("### Smart Query Routing")
+    st.caption(
+        "Local routing prototype: simple questions use the fast Baseline path; "
+        "multi-hop and relationship questions use the full Agentic workflow."
+    )
+    routed_question = st.text_area(
+        "Routed question",
+        key="routed_workspace_question",
+        height=74,
+        placeholder="Ask a simple fact or a multi-hop comparison question...",
+    )
+    if st.button(
+        "Run Smart Route",
+        use_container_width=True,
+        disabled=(
+            not st.session_state.workspace_resources["baseline"]["ready"]
+            or not st.session_state.workspace_resources["agentic"]["ready"]
+        ),
+    ):
+        question = routed_question.strip()
+        if not question:
+            st.warning("Enter a question first.")
+        else:
+            with st.spinner("Planning and routing the question..."):
+                decision, message = _run_routed_query(question)
+            if decision and message:
+                st.session_state.routed_result = {
+                    "question": question,
+                    "decision": decision,
+                    "message": message,
+                }
+
+    routed = st.session_state.get("routed_result")
+    if routed:
+        decision = routed["decision"]
+        message = routed["message"]
+        st.info(f"Route: {decision.route.title()} - {decision.reason}")
+        st.markdown(message.get("content", ""))
+        timing = message.get("workflow_metadata", {}).get("stage_timings")
+        if timing:
+            st.caption("Stage timings: " + ", ".join(
+                f"{name} {seconds:.2f}s" for name, seconds in timing.items()
+            ))
+
     display_workspace_job_status()
 
 def display_footer():
@@ -2517,6 +2711,50 @@ def display_single_chat_workspace(uploaded_file=None):
     display_chat_input()
 
 
+def display_observability():
+    """Show local request traces and latency percentiles for the current machine."""
+    from src.monitoring.sqlite_trace_store import SQLiteTraceStore
+
+    st.subheader("Local RAG Observability")
+    st.caption(
+        "Single-machine trace store. It records local requests, routes, evidence counts "
+        "and stage timings so failed cases and latency can be reviewed."
+    )
+    trace_store = SQLiteTraceStore()
+    summary = trace_store.summary()
+    metric_a, metric_b, metric_c, metric_d = st.columns(4)
+    metric_a.metric("Tracked requests", summary["count"])
+    metric_b.metric("Average latency", f"{summary['average']:.2f}s")
+    metric_c.metric("P50 latency", f"{summary['p50']:.2f}s")
+    metric_d.metric("P95 latency", f"{summary['p95']:.2f}s")
+
+    traces = trace_store.recent()
+    if not traces:
+        st.info("No local traces yet. Run a Baseline, Agentic, or Smart Route query first.")
+        return
+
+    rows = []
+    for trace in traces:
+        stage_timings = trace["details"].get("stage_timings", {})
+        rows.append({
+            "Time": trace["time"],
+            "Mode": trace["mode"],
+            "Role": trace["role"],
+            "Strategy": trace["strategy"],
+            "Latency (s)": round(trace["latency_s"], 2),
+            "Chunks": trace["chunks"],
+            "Citations": trace["citations"],
+            "Stage timings (s)": ", ".join(
+                f"{stage}: {seconds:.2f}" for stage, seconds in stage_timings.items()
+            ),
+            "Question": trace["query"],
+        })
+    st.dataframe(rows, use_container_width=True, hide_index=True)
+    if st.button("Clear local trace history", key="clear_local_trace_history"):
+        trace_store.clear()
+        st.rerun()
+
+
 def main():
     """Main application."""
     
@@ -2530,8 +2768,8 @@ def main():
     uploaded_file = sidebar()
    
     # Main content tabs
-    tab_compare, tab_eval, tab_stats = st.tabs(
-        ["Compare", "Evaluation", "Statistics"]
+    tab_compare, tab_eval, tab_stats, tab_observability = st.tabs(
+        ["Compare", "Evaluation", "Statistics", "Observability"]
     )
 
     with tab_compare:
@@ -2545,6 +2783,9 @@ def main():
         # Statistics and preview
         display_statistics()
         display_document_preview()
+
+    with tab_observability:
+        display_observability()
 
     # Footer
     display_footer()

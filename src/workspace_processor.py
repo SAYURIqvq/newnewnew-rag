@@ -19,6 +19,7 @@ def prepare_workspace(
     mode: str,
     chunking_mode: str,
     embedder: Any,
+    access_profile: Dict[str, str] | None = None,
 ) -> Dict[str, Any]:
     """Build one workspace without reading or mutating Streamlit state."""
     upload_dir = Path("data/uploads") / mode
@@ -29,10 +30,14 @@ def prepare_workspace(
     loader = DocumentLoader()
     document = loader.load(str(file_path))
     file_ext = file_path.suffix.upper()
+    access_profile = access_profile or {}
     metadata = {
         "filename": filename,
         "file_type": file_ext,
         "chunking_mode": chunking_mode,
+        "department": access_profile.get("department", "general"),
+        "access_role": access_profile.get("access_role", "shared"),
+        "document_version": access_profile.get("document_version", "v1"),
         **document.metadata,
     }
 
@@ -113,6 +118,9 @@ def prepare_workspace(
         "chunks": len(child_chunks),
         "parents": len(parent_chunks),
         "chunking_mode": chunking_mode,
+        "department": metadata["department"],
+        "access_role": metadata["access_role"],
+        "document_version": metadata["document_version"],
         "uploaded_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
     }
 

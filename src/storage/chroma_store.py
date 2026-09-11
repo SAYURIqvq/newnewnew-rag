@@ -29,6 +29,9 @@ class ChromaVectorStore:
             persist_directory: Directory for ChromaDB storage
         """
         self.persist_directory = persist_directory
+        # A local demonstration access scope. ``admin`` can inspect all indexed
+        # chunks; other roles are enforced through a Chroma metadata filter.
+        self.active_access_role = "admin"
         os.makedirs(persist_directory, exist_ok=True)
         
         # Initialize ChromaDB client
@@ -81,16 +84,30 @@ class ChromaVectorStore:
         
         print(f"\n💾 Adding chunks to ChromaDB...")
         
+        def indexed_metadata(chunk: Chunk, chunk_type: str) -> Dict[str, Any]:
+            source = chunk.metadata or {}
+            # Chroma only accepts scalar metadata values. Keep the complete
+            # retrieval/citation fields while avoiding non-indexable objects.
+            safe = {
+                key: value
+                for key, value in source.items()
+                if isinstance(value, (str, int, float, bool))
+            }
+            return {
+                **safe,
+                "doc_id": chunk.doc_id,
+                "chunk_type": chunk_type,
+                "token_count": chunk.token_count,
+                "start_idx": chunk.start_idx,
+                "end_idx": chunk.end_idx,
+                "filename": filename,
+                "access_role": safe.get("access_role", "shared"),
+            }
+
         # Add parents
         if parent_chunks:
             parent_metadatas = [
-                {
-                    "chunk_type": "parent",
-                    "token_count": p.token_count,
-                    "start_idx": p.start_idx,
-                    "end_idx": p.end_idx,
-                    "filename": filename  # ← ADD THIS
-                }
+                indexed_metadata(p, "parent")
                 for p in parent_chunks
             ]
             
@@ -105,12 +122,8 @@ class ChromaVectorStore:
         if child_chunks:
             child_metadatas = [
                 {
-                    "chunk_type": "child",
+                    **indexed_metadata(c, "child"),
                     "parent_id": c.parent_id if c.parent_id else "",
-                    "token_count": c.token_count,
-                    "start_idx": c.start_idx,
-                    "end_idx": c.end_idx,
-                    "filename": filename  # ← ADD THIS
                 }
                 for c in child_chunks
             ]
@@ -121,6 +134,15 @@ class ChromaVectorStore:
                 documents=[c.text for c in child_chunks],
                 metadatas=child_metadatas
             )    
+    def set_access_role(self, access_role: str) -> None:
+        """Set the local simulated RBAC role used for subsequent searches."""
+        self.active_access_role = (access_role or "admin").strip().lower()
+
+    def _access_filter(self) -> Optional[Dict[str, Any]]:
+        if self.active_access_role == "admin":
+            return None
+        return {"access_role": {"$in": ["shared", self.active_access_role]}}
+
     def search(
         self,
         query_embedding: List[float],
@@ -141,10 +163,16 @@ class ChromaVectorStore:
         print(f"\n🔍 Searching ChromaDB (top_k={top_k})...")
         
         # Search in child chunks
+        query_args = {
+            "query_embeddings": [query_embedding],
+            "n_results": top_k,
+            "include": ["documents", "metadatas", "distances"],
+        }
+        access_filter = self._access_filter()
+        if access_filter:
+            query_args["where"] = access_filter
         results = self.child_collection.query(
-            query_embeddings=[query_embedding],
-            n_results=top_k,
-            include=["documents", "metadatas", "distances"]
+            **query_args
         )
         
         if not results['ids'][0]:
@@ -222,10 +250,11 @@ class ChromaVectorStore:
 
     def get_parent_chunks(self, limit: int = 3) -> List[Dict[str, Any]]:
         """Return the first parent chunks as document-level overview context."""
-        results = self.parent_collection.get(
-            include=["documents", "metadatas"],
-            limit=limit,
-        )
+        get_args = {"include": ["documents", "metadatas"], "limit": limit}
+        access_filter = self._access_filter()
+        if access_filter:
+            get_args["where"] = access_filter
+        results = self.parent_collection.get(**get_args)
 
         chunks = []
         for chunk_id, text, metadata in zip(

@@ -58,6 +58,13 @@ class NaiveRAG:
         state = AgentState(query=query, chunks=chunks)
         state.metadata["method"] = "naive_rag"
         state.metadata["retrieval"] = "vector_only"
+        if not chunks:
+            state.answer = (
+                "I could not find accessible evidence for this question. "
+                "Check the selected role or process a document that grants access."
+            )
+            state.metadata["evidence_status"] = "no_accessible_evidence"
+            return state
         return self.writer.run(state)
 
     @staticmethod

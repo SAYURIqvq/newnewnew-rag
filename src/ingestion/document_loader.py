@@ -218,7 +218,9 @@ class DocumentLoader:
         for page_num, page in enumerate(reader.pages, 1):
             text = page.extract_text()
             if text.strip():
-                text_parts.append(text)
+                # Preserve page boundaries for structure-aware chunking and
+                # page-level citations. The marker is consumed by the chunker.
+                text_parts.append(f"[[PAGE:{page_num}]]\n{text}")
         
         if not text_parts:
             raise DocumentLoadError(
@@ -247,7 +249,24 @@ class DocumentLoader:
         text_parts = []
         for para in doc.paragraphs:
             if para.text.strip():
-                text_parts.append(para.text)
+                style_name = (getattr(para.style, "name", "") or "").lower()
+                if style_name.startswith("heading") or style_name in {"title", "subtitle"}:
+                    text_parts.append(f"[[SECTION:{para.text.strip()}]]")
+                else:
+                    text_parts.append(para.text)
+
+        # Tables are not flattened into surrounding prose. Keeping an explicit
+        # marker makes table chunks distinguishable at retrieval and citation time.
+        for table_index, table in enumerate(doc.tables, 1):
+            rows = []
+            for row in table.rows:
+                cells = [cell.text.strip().replace("\n", " ") for cell in row.cells]
+                if any(cells):
+                    rows.append(" | ".join(cells))
+            if rows:
+                text_parts.append(
+                    f"[[TABLE:Table {table_index}]]\n" + "\n".join(rows)
+                )
         
         if not text_parts:
             raise DocumentLoadError(

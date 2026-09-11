@@ -8,11 +8,20 @@ Uses hybrid ranking and optional reranking for optimal results.
 from typing import List, Dict, Any, Optional
 import hashlib
 from collections import defaultdict
+from functools import lru_cache
 
 from src.agents.base_agent import BaseAgent
 from src.models.agent_state import AgentState, Chunk
 from src.config import get_settings
 from src.utils.logger import setup_logger
+
+
+@lru_cache(maxsize=1)
+def _load_local_reranker(model_name: str):
+    """Load the local reranker once per process, only when enabled in the UI."""
+    from sentence_transformers import CrossEncoder
+
+    return CrossEncoder(model_name)
 
 
 class SynthesisAgent(BaseAgent):
@@ -49,7 +58,9 @@ class SynthesisAgent(BaseAgent):
         top_k: int = None,
         vector_weight: float = None,
         keyword_weight: float = None,
-        use_reranker: bool = False
+        use_reranker: bool = False,
+        use_local_reranker: bool = False,
+        local_reranker_model: str = "cross-encoder/ms-marco-MiniLM-L-6-v2",
     ):
         """
         Initialize Synthesis Agent.
@@ -58,7 +69,9 @@ class SynthesisAgent(BaseAgent):
             top_k: Number of final results (default from config)
             vector_weight: Weight for vector scores (default from config)
             keyword_weight: Weight for keyword scores (default from config)
-            use_reranker: Enable Cohere reranking (default: False)
+            use_reranker: Enable the legacy Cohere reranker (default: False)
+            use_local_reranker: Enable the optional local Cross-Encoder reranker
+            local_reranker_model: SentenceTransformers Cross-Encoder model name
         
         Example:
             >>> agent = SynthesisAgent(
@@ -75,6 +88,8 @@ class SynthesisAgent(BaseAgent):
         self.vector_weight = vector_weight or settings.vector_search_weight
         self.keyword_weight = keyword_weight or settings.keyword_search_weight
         self.use_reranker = use_reranker
+        self.use_local_reranker = use_local_reranker
+        self.local_reranker_model = local_reranker_model
         
         # Validate weights sum to 1.0
         total_weight = self.vector_weight + self.keyword_weight
@@ -91,7 +106,7 @@ class SynthesisAgent(BaseAgent):
             f"Initialized with top_k={self.top_k}, "
             f"weights=(vector:{self.vector_weight:.2f}, "
             f"keyword:{self.keyword_weight:.2f}), "
-            f"reranker={use_reranker}",
+            f"cohere_reranker={use_reranker}, local_reranker={use_local_reranker}",
             level="info"
         )
     
@@ -137,7 +152,10 @@ class SynthesisAgent(BaseAgent):
             )
             
             # Step 3: Optional reranking
-            if self.use_reranker and len(ranked_chunks) > 0:
+            if self.use_local_reranker and len(ranked_chunks) > 0:
+                reranked_chunks = self._rerank_locally(state.query, ranked_chunks)
+                self.log("Applied local Cross-Encoder reranking", level="debug")
+            elif self.use_reranker and len(ranked_chunks) > 0:
                 reranked_chunks = self._rerank_with_cohere(
                     state.query,
                     ranked_chunks
@@ -163,7 +181,11 @@ class SynthesisAgent(BaseAgent):
                 "unique_count": len(unique_chunks),
                 "final_count": len(final_chunks),
                 "deduplication_rate": 1 - (len(unique_chunks) / len(chunks)),
-                "reranker_used": self.use_reranker
+                "reranker_used": self.use_reranker or self.use_local_reranker,
+                "reranker": (
+                    self.local_reranker_model if self.use_local_reranker
+                    else "cohere" if self.use_reranker else None
+                ),
             }
             
             return state
@@ -231,8 +253,12 @@ class SynthesisAgent(BaseAgent):
             source = chunk.metadata.get("source", "unknown")
             base_score = chunk.score or 0.0
             
-            # Weight by source
-            if source == "document_overview":
+            # RRF is computed in RetrievalCoordinator over per-channel ranks.
+            # Prefer it when present because raw scores from BM25/vector/graph
+            # are not directly comparable.
+            if chunk.metadata.get("rrf_score") is not None:
+                hybrid_score = chunk.metadata["rrf_score"]
+            elif source == "document_overview":
                 hybrid_score = 1.0
             elif source == "vector":
                 hybrid_score = base_score * self.vector_weight
@@ -264,6 +290,27 @@ class SynthesisAgent(BaseAgent):
             chunk.score = chunk.metadata["hybrid_score"]
         
         return ranked
+
+    def _rerank_locally(self, query: str, chunks: List[Chunk]) -> List[Chunk]:
+        """Rerank retrieved evidence locally without a second provider API."""
+        try:
+            reranker = _load_local_reranker(self.local_reranker_model)
+            pairs = [(query, chunk.text) for chunk in chunks]
+            scores = reranker.predict(pairs, show_progress_bar=False)
+            reranked = []
+            for chunk, score in zip(chunks, scores):
+                chunk.metadata["pre_rerank_score"] = chunk.score
+                chunk.metadata["rerank_score"] = float(score)
+                chunk.metadata["reranker"] = "local_cross_encoder"
+                chunk.score = float(score)
+                reranked.append(chunk)
+            return sorted(reranked, key=lambda chunk: chunk.score or 0.0, reverse=True)
+        except Exception as exc:
+            self.log(
+                f"Local reranking unavailable ({exc}); keeping RRF order",
+                level="warning",
+            )
+            return chunks
     
     def _rerank_with_cohere(
         self,
