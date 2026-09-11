@@ -2272,7 +2272,7 @@ def _display_cached_evaluation(evaluation_cache: dict) -> None:
     st.dataframe(detail_rows, use_container_width=True, hide_index=True)
 
 
-def display_evaluation_interface():
+def display_live_evaluation_interface():
     """Display evaluation interface with custom evaluator."""
     
     st.subheader("System Evaluation")
@@ -2518,6 +2518,136 @@ def display_evaluation_interface():
     evaluation_cache = st.session_state.get("evaluation_results")
     if evaluation_cache:
         _display_cached_evaluation(evaluation_cache)
+
+
+def _format_benchmark_value(value: float, value_format: str) -> str:
+    """Format a stored thesis benchmark value for display."""
+    if value_format == "percentage":
+        return f"{value:.1%}"
+    if value_format == "seconds":
+        return f"{value:.2f}s"
+    if value_format == "words":
+        return f"{value:.0f} words"
+    return f"{value:.1f}"
+
+
+def _format_benchmark_delta(metric: dict) -> str:
+    """Format Agentic minus Baseline while preserving the metric unit."""
+    delta = float(metric.get("reported_delta", metric["agentic"] - metric["baseline"]))
+    value_format = metric["format"]
+    if value_format == "percentage":
+        return f"{delta * 100:+.1f} pp"
+    if value_format == "seconds":
+        return f"{delta:+.2f}s"
+    if value_format == "words":
+        return f"{delta:+.0f} words"
+    return f"{delta:+.1f}"
+
+
+def _benchmark_outcome(metric: dict) -> str:
+    """Describe who is favoured without treating neutral counts as quality scores."""
+    baseline = float(metric["baseline"])
+    agentic = float(metric["agentic"])
+    if abs(agentic - baseline) < 1e-9:
+        return "Equal"
+    if metric["direction"] == "neutral":
+        return "Workflow difference"
+    agentic_is_better = (
+        agentic > baseline if metric["direction"] == "higher" else agentic < baseline
+    )
+    return "Agentic higher" if agentic_is_better else "Baseline higher"
+
+
+def display_evaluation_interface():
+    """Display stored dissertation benchmark results, rather than a live smoke test."""
+    benchmark_path = Path("data/evaluation/thesis_benchmark_results.json")
+    try:
+        benchmark_data = json.loads(benchmark_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        st.error(f"Unable to load thesis benchmark results: {exc}")
+        return
+
+    benchmark_sets = benchmark_data.get("benchmark_sets", [])
+    if not benchmark_sets:
+        st.warning("No thesis benchmark sets are available.")
+        return
+
+    st.subheader(benchmark_data.get("title", "Thesis Benchmark Results"))
+    st.caption(benchmark_data.get("source_note", ""))
+
+    selected_title = st.selectbox(
+        "Benchmark set",
+        [benchmark["title"] for benchmark in benchmark_sets],
+        key="thesis_benchmark_selector",
+    )
+    benchmark = next(item for item in benchmark_sets if item["title"] == selected_title)
+    metrics = benchmark["metrics"]
+    metric_by_id = {metric["id"]: metric for metric in metrics}
+
+    st.info(
+        f"**{benchmark['questions']} controlled questions.** {benchmark['description']} "
+        "Both workflows answered the same benchmark questions; Baseline used vector-only RAG and "
+        "Agentic used planning, hybrid retrieval, validation, review, and grounding checks."
+    )
+
+    headline_metrics = [
+        metric_by_id[metric_id]
+        for metric_id in benchmark.get("headline_metrics", [])
+        if metric_id in metric_by_id
+    ]
+    if headline_metrics:
+        headline_columns = st.columns(len(headline_metrics))
+        for column, metric in zip(headline_columns, headline_metrics):
+            delta_color = "inverse" if metric["direction"] == "lower" else "normal"
+            with column:
+                st.metric(
+                    metric["label"],
+                    _format_benchmark_value(metric["agentic"], metric["format"]),
+                    delta=(
+                        f"Baseline {_format_benchmark_value(metric['baseline'], metric['format'])} "
+                        f"({_format_benchmark_delta(metric)})"
+                    ),
+                    delta_color=delta_color,
+                )
+
+    st.markdown("### Baseline vs Agentic")
+    comparison_rows = [
+        {
+            "Metric": metric["label"],
+            "Baseline": _format_benchmark_value(metric["baseline"], metric["format"]),
+            "Agentic": _format_benchmark_value(metric["agentic"], metric["format"]),
+            "Difference": _format_benchmark_delta(metric),
+            "Outcome": _benchmark_outcome(metric),
+            "Interpretation": metric["interpretation"],
+        }
+        for metric in metrics
+    ]
+    st.dataframe(comparison_rows, use_container_width=True, hide_index=True)
+
+    if benchmark["id"] == "complex_reasoning":
+        st.success(
+            "Main finding: Agentic RAG improved the thesis complex reasoning score, "
+            "missing-information accuracy, multi-hop coverage, and graph reasoning success."
+        )
+        st.warning(
+            "Trade-off: it was slower and did not improve every metric, including keyword F1, "
+            "evidence support rate, and citation-based context usage."
+        )
+    else:
+        st.warning(
+            "Interpretation: on general document questions, the Agentic gain was small while "
+            "the latency cost was substantial. This supports routing simple questions to Baseline."
+        )
+
+    with st.expander("Benchmark protocol and scope", expanded=False):
+        st.markdown(
+            "- Results are stored dissertation outputs, shown here for a reproducible defense demonstration.\n"
+            "- The two workflows were evaluated on the same question set and controlled source documents.\n"
+            "- The page intentionally does not turn the current uploaded-document run into a thesis accuracy claim.\n"
+            "- The complex reasoning benchmark is the primary evidence for the proposed workflow; "
+            "the multi-document benchmark shows the limits and latency trade-off."
+        )
+
 
 def display_document_preview():
     """Show preview of uploaded documents."""

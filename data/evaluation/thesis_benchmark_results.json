@@ -1,0 +1,198 @@
+{
+  "title": "Thesis Benchmark Results",
+  "source_note": "Stored results reported in the dissertation. These values are not recalculated from the document currently loaded in the browser.",
+  "benchmark_sets": [
+    {
+      "id": "complex_reasoning",
+      "title": "Complex Reasoning Benchmark",
+      "questions": 40,
+      "description": "The primary benchmark for comparison, multi-hop, graph, and missing-information questions.",
+      "headline_metrics": [
+        "thesis_complex_reasoning_score",
+        "missing_information_accuracy",
+        "graph_reasoning_success",
+        "average_latency_seconds"
+      ],
+      "metrics": [
+        {
+          "id": "thesis_complex_reasoning_score",
+          "label": "Thesis complex reasoning score",
+          "baseline": 0.85,
+          "agentic": 0.921,
+          "reported_delta": 0.07,
+          "format": "percentage",
+          "direction": "higher",
+          "interpretation": "Primary weighted result for the thesis complex-reasoning tasks."
+        },
+        {
+          "id": "ground_truth_keyword_f1",
+          "label": "Ground-truth keyword F1",
+          "baseline": 0.464,
+          "agentic": 0.459,
+          "format": "percentage",
+          "direction": "higher",
+          "interpretation": "Agentic was slightly lower on concise keyword precision."
+        },
+        {
+          "id": "ground_truth_keyword_coverage",
+          "label": "Ground-truth keyword coverage",
+          "baseline": 0.766,
+          "agentic": 0.795,
+          "reported_delta": 0.03,
+          "format": "percentage",
+          "direction": "higher",
+          "interpretation": "Agentic covered more required answer points."
+        },
+        {
+          "id": "missing_information_accuracy",
+          "label": "Missing-information accuracy",
+          "baseline": 0.833,
+          "agentic": 1.0,
+          "format": "percentage",
+          "direction": "higher",
+          "interpretation": "Agentic more consistently identified when the document did not provide the requested evidence."
+        },
+        {
+          "id": "multi_hop_coverage",
+          "label": "Multi-hop coverage",
+          "baseline": 0.838,
+          "agentic": 0.865,
+          "format": "percentage",
+          "direction": "higher",
+          "interpretation": "Agentic covered more linked pieces of evidence."
+        },
+        {
+          "id": "graph_reasoning_success",
+          "label": "Graph reasoning success",
+          "baseline": 0.882,
+          "agentic": 0.923,
+          "format": "percentage",
+          "direction": "higher",
+          "interpretation": "Agentic performed better on entity-relationship reasoning questions."
+        },
+        {
+          "id": "evidence_support_rate",
+          "label": "Evidence support rate",
+          "baseline": 0.843,
+          "agentic": 0.829,
+          "format": "percentage",
+          "direction": "higher",
+          "interpretation": "More retrieved context did not improve this support measure."
+        },
+        {
+          "id": "citation_rate",
+          "label": "Citation rate",
+          "baseline": 0.975,
+          "agentic": 0.975,
+          "format": "percentage",
+          "direction": "higher",
+          "interpretation": "Both workflows already produced citations for most answers."
+        },
+        {
+          "id": "citation_based_context_usage",
+          "label": "Citation-based context usage",
+          "baseline": 0.49,
+          "agentic": 0.43,
+          "format": "percentage",
+          "direction": "higher",
+          "interpretation": "Agentic's larger context set was used less efficiently under this measure."
+        },
+        {
+          "id": "average_word_count",
+          "label": "Average answer length",
+          "baseline": 115.325,
+          "agentic": 120.8,
+          "format": "words",
+          "direction": "neutral",
+          "interpretation": "The quality difference cannot be explained only by longer answers."
+        },
+        {
+          "id": "average_latency_seconds",
+          "label": "Average end-to-end latency",
+          "baseline": 13.92,
+          "agentic": 70.05,
+          "format": "seconds",
+          "direction": "lower",
+          "interpretation": "The full Agentic workflow has a substantial operational cost."
+        },
+        {
+          "id": "average_retrieved_chunks",
+          "label": "Average retrieved chunks",
+          "baseline": 5.0,
+          "agentic": 8.8,
+          "format": "number",
+          "direction": "neutral",
+          "interpretation": "Agentic used a broader evidence set."
+        }
+      ]
+    },
+    {
+      "id": "multi_document",
+      "title": "Multi-document Benchmark",
+      "questions": 32,
+      "description": "A general document-question benchmark showing that Agentic is not better on every normal question.",
+      "headline_metrics": [
+        "ground_truth_keyword_coverage",
+        "citation_rate",
+        "average_latency_seconds",
+        "average_retrieved_chunks"
+      ],
+      "metrics": [
+        {
+          "id": "ground_truth_keyword_coverage",
+          "label": "Ground-truth keyword coverage",
+          "baseline": 0.782,
+          "agentic": 0.789,
+          "format": "percentage",
+          "direction": "higher",
+          "interpretation": "The coverage gain was small on general document questions."
+        },
+        {
+          "id": "citation_rate",
+          "label": "Citation rate",
+          "baseline": 0.938,
+          "agentic": 0.938,
+          "format": "percentage",
+          "direction": "higher",
+          "interpretation": "Citation frequency was unchanged."
+        },
+        {
+          "id": "citation_based_context_usage",
+          "label": "Citation-based context usage",
+          "baseline": 0.578,
+          "agentic": 0.375,
+          "format": "percentage",
+          "direction": "higher",
+          "interpretation": "The broader Agentic context was less efficiently used under this measure."
+        },
+        {
+          "id": "average_word_count",
+          "label": "Average answer length",
+          "baseline": 50.906,
+          "agentic": 51.594,
+          "format": "words",
+          "direction": "neutral",
+          "interpretation": "Answer length was effectively unchanged."
+        },
+        {
+          "id": "average_latency_seconds",
+          "label": "Average end-to-end latency",
+          "baseline": 10.28,
+          "agentic": 55.6,
+          "format": "seconds",
+          "direction": "lower",
+          "interpretation": "The Agentic workflow was more than five times slower."
+        },
+        {
+          "id": "average_retrieved_chunks",
+          "label": "Average retrieved chunks",
+          "baseline": 2.0,
+          "agentic": 3.0,
+          "format": "number",
+          "direction": "neutral",
+          "interpretation": "Agentic retrieved one additional chunk on average."
+        }
+      ]
+    }
+  ]
+}
