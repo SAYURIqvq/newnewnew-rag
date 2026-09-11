@@ -2191,6 +2191,46 @@ def _display_cached_evaluation(evaluation_cache: dict) -> None:
     ]
     st.dataframe(summary_rows, use_container_width=True, hide_index=True)
 
+    st.markdown("### Reliability Control Coverage")
+    st.caption(
+        "This section compares workflow safeguards, not answer accuracy. It makes the "
+        "additional reliability controls in the Agentic path visible even when both "
+        "workflows saturate the generic citation and context-usage checks."
+    )
+    controls = [
+        {
+            "Control": "Query planning and decomposition",
+            "Baseline": "Not included",
+            "Agentic": "Planner + Query Decomposer",
+            "Live evidence": f"Strategies selected: {', '.join(sorted({row['strategy'] for row in agentic_rows}))}",
+        },
+        {
+            "Control": "Retrieval evidence channels",
+            "Baseline": "Vector only",
+            "Agentic": "Vector + BM25 + Graph when available",
+            "Live evidence": "Hybrid retrieval coordinated before synthesis",
+        },
+        {
+            "Control": "Evidence sufficiency validation",
+            "Baseline": "Not included",
+            "Agentic": "Validator with bounded re-retrieval",
+            "Live evidence": f"Average validation score: {float(agentic['avg_validation_score']):.1%}",
+        },
+        {
+            "Control": "Answer quality review",
+            "Baseline": "Not included",
+            "Agentic": "Critic with bounded regeneration",
+            "Live evidence": f"Average critic score: {float(agentic['avg_critic_score']):.1%}",
+        },
+        {
+            "Control": "Grounding and citation release check",
+            "Baseline": "No reliability gate",
+            "Agentic": "Deterministic Reliability Gate",
+            "Live evidence": "Final answer is checked before release",
+        },
+    ]
+    st.dataframe(controls, use_container_width=True, hide_index=True)
+
     control_left, control_right = st.columns(2)
     with control_left:
         st.markdown("### Baseline Path")
@@ -2200,7 +2240,11 @@ def _display_cached_evaluation(evaluation_cache: dict) -> None:
         st.markdown("### Agentic Controls")
         st.metric("Validation score", f"{float(agentic['avg_validation_score']):.1%}")
         st.metric("Critic score", f"{float(agentic['avg_critic_score']):.1%}")
-        st.metric("Regeneration rate", f"{float(agentic['improvement_rate']):.1%}")
+        st.metric(
+            "Review loop triggered",
+            f"{float(agentic['improvement_rate']):.1%}",
+            help="Percentage of answers for which the Critic requested a bounded rewrite.",
+        )
 
     st.markdown("### Question Level Comparison")
     detail_rows = []
